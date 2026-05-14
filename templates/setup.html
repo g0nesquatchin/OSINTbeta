@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Setup · OSINT{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h1>Set up SpiderFoot</h1>
+  <p class="muted">This app uses SpiderFoot as its scanning engine. It needs to be cloned and installed once.</p>
+</div>
+
+<div class="panel">
+  <h2>Status</h2>
+  <table>
+    <tr><td>Installed</td><td>{% if status.installed %}<span class="pill on">yes</span> <code>{{ status.sf_path }}</code>{% else %}<span class="pill err">no</span>{% endif %}</td></tr>
+    <tr><td>Reachable</td><td>{% if status.reachable %}<span class="pill on">yes</span>{% else %}<span class="pill off">no</span>{% endif %} at <code>{{ status.base_url }}</code></td></tr>
+    <tr><td>Running PID</td><td>{{ status.pid or '—' }}</td></tr>
+    {% if status.last_error %}
+      <tr><td>Last error</td><td class="danger mono">{{ status.last_error }}</td></tr>
+    {% endif %}
+  </table>
+</div>
+
+{% if not status.installed %}
+<div class="panel">
+  <h2>Install</h2>
+  <p>Run these in Terminal, from inside <code>{{ app_root }}</code>:</p>
+  <pre style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:14px;overflow:auto;"><code>git clone https://github.com/smicallef/spiderfoot.git
+cd spiderfoot
+pip install -r requirements.txt
+cd ..</code></pre>
+  <p class="small">After that, restart this app (Ctrl-C in the terminal where it's running, then <code>python webapp.py</code>) and the SpiderFoot indicator in the top right should turn green.</p>
+</div>
+{% else %}
+<div class="panel">
+  <h2>Start SpiderFoot</h2>
+  <p>SpiderFoot is installed but not currently reachable.</p>
+  <form method="post" action="{{ url_for('setup_start') }}">
+    <button type="submit">Start SpiderFoot</button>
+  </form>
+  <p class="small" style="margin-top:8px;">Startup takes a few seconds.</p>
+</div>
+{% endif %}
+
+<div class="panel subtle">
+  <h3>What SpiderFoot does</h3>
+  <p class="small">SpiderFoot is an open-source OSINT automation tool. Give it a target — domain, IP, email, name, username, phone — and it queries up to ~200 data sources to enrich it. Each "scan" is one investigation, and results are organized by event type (subdomains, related accounts, breaches, etc.).</p>
+</div>
+
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit topic' if topic else 'New topic' }} · OSINT{% endblock %}
+{% block content %}
+
+<div class="small"><a href="{{ url_for('monitor_topics') }}">← Topics</a></div>
+<h1>{{ 'Edit topic: ' + topic.name if topic else 'New topic' }}</h1>
+
+<form method="post" action="{{ url_for('monitor_topic_edit', topic_id=topic.id) if topic else url_for('monitor_topic_new') }}">
+  <div class="panel">
+    <div class="field-row cols-2">
+      <div class="field">
+        <label>Name</label>
+        <input type="text" name="name" value="{{ topic.name if topic else '' }}" required placeholder="e.g. missing_persons">
+      </div>
+      <div class="field">
+        <label>Match mode</label>
+        <select name="match_mode">
+          {% for m in ['word', 'literal', 'regex'] %}
+            <option value="{{ m }}" {% if topic and topic.match_mode==m or not topic and m=='word' %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Keywords (one per line)</label>
+      <textarea name="keywords" rows="10" placeholder="one keyword per line&#10;multi word phrases ok">{{ topic.keywords|join('\n') if topic else '' }}</textarea>
+      <div class="small" style="margin-top:6px;">
+        <code>word</code> = whole-word match (won't match "cattle" for "cat"). <code>literal</code> = case-insensitive substring. <code>regex</code> = full Python regex.
+      </div>
+    </div>
+  </div>
+  <div class="row">
+    <button type="submit">{{ 'Save topic' if topic else 'Create topic' }}</button>
+    <a class="btn ghost" href="{{ url_for('monitor_topics') }}">Cancel</a>
+    {% if topic %}
+      <form method="post" action="{{ url_for('monitor_topic_delete', topic_id=topic.id) }}" onsubmit="return confirm('Delete topic {{ topic.name }}? Existing matches stay but new ones stop being tagged with it.');" style="display:inline;">
+        <button class="danger-btn" type="submit">Delete topic</button>
+      </form>
+    {% endif %}
+  </div>
+</form>
+
+{% endblock %}

@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block title %}Map · OSINT{% endblock %}
+{% block content %}
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+<style>
+  /* Map page lays out tall to feel immersive */
+  #mapWrap { display: grid; grid-template-columns: 280px 1fr; gap: 14px; }
+  @media (max-width: 860px) { #mapWrap { grid-template-columns: 1fr; } }
+  #map { height: calc(100vh - 220px); min-height: 480px;
+         border-radius: 10px; overflow: hidden;
+         border: 1px solid var(--border); background: #0a0d12; }
+  .leaflet-popup-content-wrapper {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--border-2);
+  }
+  .leaflet-popup-tip { background: var(--panel); }
+  .leaflet-popup-content { font: 13px/1.5 -apple-system, sans-serif; max-height: 280px; overflow: auto; margin: 10px 12px; }
+  .leaflet-popup-content a { color: var(--accent); }
+  .leaflet-popup-content h4 { margin: 0 0 6px; font-size: 13px; }
+  .leaflet-control-attribution { font-size: 10px; opacity: 0.55; }
+  .marker-cluster div { color: #fff; font-weight: 600; }
+  .marker-cluster-small { background: rgba(106,166,255,.35); }
+  .marker-cluster-small div { background: rgba(106,166,255,.85); }
+  .marker-cluster-medium { background: rgba(255,184,107,.35); }
+  .marker-cluster-medium div { background: rgba(255,184,107,.9); }
+  .marker-cluster-large { background: rgba(255,124,124,.4); }
+  .marker-cluster-large div { background: rgba(255,124,124,.95); }
+</style>
+
+<div class="row between" style="margin-bottom:14px;">
+  <div>
+    <h1 style="margin:0 0 2px;">Live OSINT map</h1>
+    <div class="small muted">
+      Pan and zoom anywhere — world down to street level. Each pin is a
+      location currently being mentioned in news for your keyword. Click
+      a pin to see the underlying articles.
+    </div>
+  </div>
+</div>
+
+<div id="mapWrap">
+
+  <!-- Controls -->
+  <div>
+    <div class="panel">
+      <div class="field">
+        <label>Keyword</label>
+        <input type="text" id="kwInput" value="{{ last_keyword }}"
+               placeholder='e.g. missing persons, wildfire' autocomplete="off">
+        <div class="small muted" style="margin-top:4px;">
+          Type any phrase. Wrap in <code>"quotes"</code> for an exact match.
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Or pick a saved topic</label>
+        <select id="topicSel">
+          <option value="">(no topic)</option>
+          {% for t in topics %}
+            <option value="{{ t.id }}" {% if last_topic_id==t.id %}selected{% endif %}>{{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Timespan</label>
+        <select id="timespanSel">
+          {% for ts, lbl in [('1h','last hour'),('6h','last 6 hours'),('24h','last 24 hours'),('3d','last 3 days'),('7d','last week'),('14d','last 2 weeks'),('1m','last month')] %}
+            <option value="{{ ts }}" {% if last_timespan==ts %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button id="searchBtn" style="width:100%;">Search the world</button>
+
+      <div id="searchStatus" class="small" style="margin-top:10px;color:var(--muted);">
+        Pick a keyword or topic, then click Search.
+      </div>
+    </div>
+
+    <div class="panel subtle">
+      <h3>About this map</h3>
+      <p class="small">
+        Powered by GDELT's Geo API. It scans news in ~100 languages
+        every 15 minutes and tags articles with the specific locations
+        they mention — not just the country of the outlet. Zoom in
+        on a state, city, or town to see hyper-local coverage.
+      </p>
+      <p class="small muted" style="margin:0;">
+        Tip: try a keyword like <code>wildfire</code> or <code>protest</code>
+        with timespan = "last week" to see how it lights up regions.
+      </p>
+    </div>
+  </div>
+
+  <!-- Map -->
+  <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<script>
+// --- Map setup -------------------------------------------------
+
+const map = L.map('map', {
+  center: [20, 0],
+  zoom: 2,
+  worldCopyJump: true,
+  zoomControl: true,
+  preferCanvas: true,
+});
+
+// Dark tiles to match the UI
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  subdomains: 'abcd',
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> · &copy; <a href="https://carto.com/attributions">CARTO</a> · OSINT data &copy; <a href="https://www.gdeltproject.org">GDELT</a>',
+}).addTo(map);
+
+const cluster = L.markerClusterGroup({
+  chunkedLoading: true,
+  showCoverageOnHover: false,
+  spiderfyOnMaxZoom: true,
+  disableClusteringAtZoom: 8,
+}).addTo(map);
+
+// --- Data fetching ---------------------------------------------
+
+const status = document.getElementById('searchStatus');
+
+async function runSearch() {
+  const kw = document.getElementById('kwInput').value.trim();
+  const topicId = document.getElementById('topicSel').value;
+  const timespan = document.getElementById('timespanSel').value;
+  if (!kw && !topicId) {
+    status.innerHTML = '<span class="danger">Type a keyword or pick a topic first.</span>';
+    return;
+  }
+  status.innerHTML = `Searching <b>${escapeHtml(kw || '(saved topic)')}</b> in ${escapeHtml(timespan)}… (this can take 3-10 seconds)`;
+  const btn = document.getElementById('searchBtn');
+  btn.disabled = true; btn.textContent = 'Searching…';
+
+  const q = new URLSearchParams({ timespan });
+  if (kw) q.set('keyword', kw);
+  if (topicId) q.set('topic_id', topicId);
+
+  try {
+    const r = await fetch('/map/geo?' + q.toString());
+    const data = await r.json();
+    if (!r.ok) {
+      status.innerHTML = `<span class="danger">${escapeHtml(data.error || 'Search failed.')}</span>`;
+      return;
+    }
+    const features = data.features || [];
+    cluster.clearLayers();
+    if (!features.length) {
+      status.innerHTML =
+        `Query: <code>${escapeHtml(data.query)}</code><br>` +
+        `<span class="warn">0 locations found in this timespan.</span> ` +
+        `Try widening the timespan or using a different keyword.`;
+      return;
+    }
+    let total = 0;
+    let bounds = L.latLngBounds();
+    for (const f of features) {
+      if (!f.geometry || !f.geometry.coordinates) continue;
+      const [lon, lat] = f.geometry.coordinates;
+      const p = f.properties || {};
+      const count = parseInt(p.count || p.html?.match(/(\d+) article/)?.[1] || 1, 10);
+      total += count || 1;
+      const marker = L.circleMarker([lat, lon], {
+        radius: Math.min(4 + Math.sqrt(count || 1), 18),
+        color: '#ffb86b',
+        fillColor: '#ffb86b',
+        weight: 1,
+        fillOpacity: 0.55,
+      });
+      const articlesHtml = p.html || '<em>(no article list)</em>';
+      marker.bindPopup(
+        `<h4>${escapeHtml(p.name || 'Unnamed location')}</h4>` +
+        `<div class="small muted" style="margin-bottom:6px;">${count} article${count===1?'':'s'}</div>` +
+        articlesHtml,
+        { maxWidth: 360 }
+      );
+      cluster.addLayer(marker);
+      bounds.extend([lat, lon]);
+    }
+    if (bounds.isValid() && features.length > 1) {
+      map.fitBounds(bounds.pad(0.15), { animate: true, maxZoom: 6 });
+    }
+    status.innerHTML =
+      `<b>${features.length}</b> locations · ~${total} articles · ` +
+      `query: <code>${escapeHtml(data.query)}</code>`;
+  } catch (e) {
+    status.innerHTML = `<span class="danger">Network error: ${escapeHtml(e.message)}</span>`;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Search the world';
+  }
+}
+
+document.getElementById('searchBtn').addEventListener('click', runSearch);
+document.getElementById('kwInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); runSearch(); }
+});
+document.getElementById('topicSel').addEventListener('change', () => {
+  // Clear keyword when switching to a saved topic, and vice-versa
+  if (document.getElementById('topicSel').value) {
+    document.getElementById('kwInput').value = '';
+  }
+});
+
+function escapeHtml(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Auto-run on first load if there's a remembered query
+{% if last_keyword or last_topic_id %}
+  setTimeout(runSearch, 250);
+{% endif %}
+</script>
+
+{% endblock %}

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ scan.name if scan else 'Scan' }} · OSINT{% endblock %}
+{% block content %}
+
+{% if scan %}
+<div class="row between" style="margin-bottom:14px;">
+  <div>
+    <div class="small"><a href="{{ url_for('scans') }}">← All scans</a></div>
+    <h1 style="margin:4px 0 2px;">{{ scan.name }}</h1>
+    <div class="small mono">{{ scan.target }}</div>
+  </div>
+  <div class="row">
+    {% if status.is_running %}
+      <span class="pill run" id="status-pill"><span class="dot"></span>{{ status.status|lower }}</span>
+      <form method="post" action="{{ url_for('scan_stop', scan_id=scan.id) }}" style="display:inline;">
+        <button class="ghost" type="submit">Stop</button>
+      </form>
+    {% else %}
+      {% if status.status == 'FINISHED' %}
+        <span class="pill on" id="status-pill">finished</span>
+      {% elif status.status == 'ABORTED' %}
+        <span class="pill off" id="status-pill">aborted</span>
+      {% else %}
+        <span class="pill err" id="status-pill">{{ status.status|lower }}</span>
+      {% endif %}
+      <form method="post" action="{{ url_for('scan_delete', scan_id=scan.id) }}"
+            onsubmit="return confirm('Delete this scan?');" style="display:inline;">
+        <button class="danger-btn" type="submit">Delete</button>
+      </form>
+    {% endif %}
+    <a class="btn secondary" href="{{ sf_base }}/scaninfo?id={{ scan.id }}" target="_blank" rel="noopener">Open in SpiderFoot ↗</a>
+  </div>
+</div>
+
+<div class="grid grid-4" style="margin-bottom:16px;">
+  <div class="panel"><h3>Started</h3><div>{{ status.started | ts }}</div></div>
+  <div class="panel"><h3>Ended</h3><div>{{ status.ended | ts }}</div></div>
+  <div class="panel"><h3>Total results</h3><div style="font-size:22px;font-weight:600;">{{ status.elements }}</div></div>
+  <div class="panel"><h3>Status</h3><div>{{ status.status|lower }}</div></div>
+</div>
+{% endif %}
+
+<div class="grid" style="grid-template-columns: 240px 1fr;">
+  <div class="panel" style="padding:0;height:fit-content;">
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+      <h3 style="margin:0;">Event types</h3>
+    </div>
+    <div style="max-height:560px;overflow:auto;">
+      <a href="{{ url_for('scan_detail', scan_id=scan.id) }}"
+         style="display:flex;justify-content:space-between;padding:9px 16px;border-bottom:1px solid var(--border);color:{{ 'var(--text)' if current_type=='ALL' else 'var(--muted)' }};{{ 'background:var(--panel-2);' if current_type=='ALL' else '' }}">
+        <span>All events</span>
+        <span class="small">{{ status.elements }}</span>
+      </a>
+      {% for s in summary %}
+        <a href="{{ url_for('scan_detail', scan_id=scan.id, type=s.type) }}"
+           style="display:flex;justify-content:space-between;padding:9px 16px;border-bottom:1px solid var(--border);color:{{ 'var(--text)' if current_type==s.type else 'var(--muted)' }};{{ 'background:var(--panel-2);' if current_type==s.type else '' }}">
+          <span>{{ s.type }}</span>
+          <span class="small">{{ s.count }}</span>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel" style="padding:0;">
+    <div class="panel-header" style="padding:14px 16px;border-bottom:1px solid var(--border);margin:0;">
+      <h2 style="margin:0;">{{ current_type if current_type != 'ALL' else 'All events' }}</h2>
+      <span class="small">{{ events|length }} shown</span>
+    </div>
+    {% if events %}
+      <table>
+        <thead>
+          <tr>
+            <th class="nowrap">Found</th>
+            <th>Data</th>
+            <th>Source module</th>
+            {% if current_type == 'ALL' %}<th>Type</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in events %}
+            <tr>
+              <td class="small nowrap">{{ e.generated | ts }}</td>
+              <td class="mono"><span class="truncate" title="{{ e.data }}">{{ e.data }}</span></td>
+              <td class="small">{{ e.source_module }}</td>
+              {% if current_type == 'ALL' %}<td class="small">{{ e.type }}</td>{% endif %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">
+        <p>No events yet for this type.</p>
+        {% if status.is_running %}
+          <p class="small">Scan is still running — results stream in as modules complete.</p>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+(async function poll() {
+  {% if status.is_running and scan %}
+  try {
+    const r = await fetch("{{ url_for('scan_status_json', scan_id=scan.id) }}");
+    const s = await r.json();
+    if (s && !s.is_running) {
+      // Finished — reload to refresh full result list
+      window.location.reload();
+      return;
+    }
+  } catch (e) {}
+  setTimeout(poll, 4000);
+  {% endif %}
+})();
+</script>
+
+{% endblock %}

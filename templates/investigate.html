@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Usernames · OSINT{% endblock %}
+{% block content %}
+
+<h1>Username lookup</h1>
+<p class="muted">
+  Check a handle across hundreds of public platforms using
+  <a href="https://github.com/sherlock-project/sherlock" target="_blank" rel="noopener">Sherlock</a>.
+  Only public profile URLs are checked — the same view an anonymous visitor would see.
+</p>
+
+{% if not sherlock_installed %}
+  <div class="flash error">
+    Sherlock isn't installed. In your active virtualenv run
+    <code>pip install sherlock-project</code> and reload this page.
+  </div>
+{% endif %}
+
+<div class="panel">
+  <form method="post" action="{{ url_for('investigate') }}">
+    <div class="field-row cols-2">
+      <div class="field">
+        <label>Username</label>
+        <input type="text" name="username" value="{{ username }}"
+               placeholder="handle without the @"
+               pattern="[A-Za-z0-9._\-]{1,40}" required>
+      </div>
+      <div class="field" style="display:flex;align-items:end;">
+        <button type="submit" {% if not sherlock_installed %}disabled{% endif %}>Look up</button>
+      </div>
+    </div>
+    <div class="small">Lookups take 30–90 seconds while Sherlock checks each platform.</div>
+  </form>
+</div>
+
+{% if result %}
+  <div class="panel" style="padding:0;">
+    <div class="panel-header" style="padding:14px 18px;border-bottom:1px solid var(--border);margin:0;">
+      <h2 style="margin:0;">Results for <code>{{ result.username }}</code></h2>
+      <span class="small">{{ result.raw_count }} hit(s)</span>
+    </div>
+    {% if result.error %}
+      <div class="flash error" style="margin:14px;">{{ result.error }}</div>
+    {% endif %}
+    {% if result.hits %}
+      <table>
+        <thead><tr><th>Platform</th><th>URL</th></tr></thead>
+        <tbody>
+          {% for h in result.hits %}
+            <tr>
+              <td>{{ h.site }}</td>
+              <td class="mono"><a href="{{ h.url }}" target="_blank" rel="noopener">{{ h.url }}</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% elif not result.error %}
+      <div class="empty"><p>No hits found.</p></div>
+    {% endif %}
+  </div>
+{% endif %}
+
+<div class="panel subtle">
+  <h3>How to read these results</h3>
+  <p class="small">A match means a public profile <i>page</i> exists for that handle on a platform — not that the same person owns multiple accounts. People reuse common handles and others register them adversarially. Treat results as leads, not proof.</p>
+</div>
+
+{% endblock %}

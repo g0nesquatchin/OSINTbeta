@@ -1,0 +1,18 @@
+# Core web app
+Flask>=3.0
+requests>=2.31
+PyYAML>=6.0
+
+# Monitor (keyword feed scraping)
+feedparser>=6.0
+praw>=7.7
+Mastodon.py>=1.8
+# tweepy>=4.14   # uncomment if you want the X/Twitter source
+
+# Sherlock (username lookup)
+# Install separately if you want the Investigate page to work:
+#   pip install sherlock-project
+
+# SpiderFoot itself is NOT a pip package -- clone it into ./spiderfoot/
+# from https://github.com/smicallef/spiderfoot and install its own
+# requirements.txt. See README.md for full setup steps.

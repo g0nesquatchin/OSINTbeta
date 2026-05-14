@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Sources · Monitor · OSINT{% endblock %}
+{% block content %}
+
+<div class="small"><a href="{{ url_for('monitor') }}">← Monitor</a></div>
+<h1>Sources</h1>
+<p class="muted">Enable each data source independently and configure it. Topics' keywords are passed automatically — most sources don't need you to repeat them here.</p>
+
+<div class="flash warn">
+  <b>Not supported:</b> Facebook and Instagram. Meta removed public keyword-search APIs, and CrowdTangle (the one legitimate alternative) was shut down in August 2024. See <a href="{{ url_for('resources') }}">Resources</a> for what's still possible.
+</div>
+
+{% macro source_panel(name, body) %}
+  {% set s = sources[name] %}
+  <form method="post" action="{{ url_for('monitor_source_save', name=name) }}" id="src-{{ name }}" class="panel">
+    <div class="row between" style="margin-bottom:10px;">
+      <h2 style="margin:0;">{{ source_labels.get(name, name) }}</h2>
+      {% if s.enabled %}<span class="pill on">on</span>{% else %}<span class="pill off">off</span>{% endif %}
+    </div>
+    <label class="row" style="margin-bottom:14px;">
+      <input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}>
+      <span class="small" style="margin-left:6px;text-transform:none;letter-spacing:normal;font-size:13px;">Enabled</span>
+    </label>
+    {{ body }}
+    <div style="margin-top:12px;"><button type="submit">Save {{ source_labels.get(name, name) }}</button></div>
+  </form>
+{% endmacro %}
+
+{% set s = sources['gdelt'] %}
+<form method="post" action="{{ url_for('monitor_source_save', name='gdelt') }}" id="src-gdelt" class="panel">
+  <div class="row between" style="margin-bottom:8px;">
+    <h2 style="margin:0;">GDELT (global news)</h2>
+    {% if s.enabled %}<span class="pill on">on</span>{% else %}<span class="pill off">off</span>{% endif %}
+  </div>
+  <p class="small muted">Indexes news in ~100 languages from every country, refreshed every 15 minutes. Free, no API key. Best single source for global news coverage.</p>
+  <label class="row" style="margin-bottom:14px;">
+    <input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}>
+    <span class="small" style="margin-left:6px;text-transform:none;letter-spacing:normal;font-size:13px;">Enabled</span>
+  </label>
+  <div class="field-row cols-3">
+    <div class="field">
+      <label>Timespan</label>
+      <input type="text" name="timespan" value="{{ s.config.get('timespan', '24h') }}" placeholder="24h, 7d, 1m">
+      <div class="small">e.g. <code>24h</code>, <code>3d</code>, <code>1w</code></div>
+    </div>
+    <div class="field">
+      <label>Max records per keyword</label>
+      <input type="number" name="max_records" value="{{ s.config.get('max_records', 75) }}" min="1" max="250">
+    </div>
+    <div class="field">
+      <label>Language (optional)</label>
+      <input type="text" name="language" value="{{ s.config.get('language', '') }}" placeholder="e.g. english, spanish">
+      <div class="small">Blank = all languages</div>
+    </div>
+  </div>
+  <div style="margin-top:12px;"><button type="submit">Save GDELT</button></div>
+</form>
+
+{% set s = sources['google_news'] %}
+<form method="post" action="{{ url_for('monitor_source_save', name='google_news') }}" id="src-google_news" class="panel">
+  <div class="row between" style="margin-bottom:8px;">
+    <h2 style="margin:0;">Google News</h2>
+    {% if s.enabled %}<span class="pill on">on</span>{% else %}<span class="pill off">off</span>{% endif %}
+  </div>
+  <p class="small muted">Keyword search across Google News results via their public RSS endpoint. Free, no key.</p>
+  <label class="row" style="margin-bottom:14px;">
+    <input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}>
+    <span class="small" style="margin-left:6px;text-transform:none;letter-spacing:normal;font-size:13px;">Enabled</span>
+  </label>
+  <div class="field-row cols-3">
+    <div class="field">
+      <label>Language</label>
+      <input type="text" name="lang" value="{{ s.config.get('lang', 'en-US') }}">
+    </div>
+    <div class="field">
+      <label>Country</label>
+      <input type="text" name="country" value="{{ s.config.get('country', 'US') }}">
+    </div>
+    <div class="field">
+      <label>CEID (optional)</label>
+      <input type="text" name="ceid" value="{{ s.config.get('ceid', '') }}" placeholder="US:en">
+    </div>
+  </div>
+  <div style="margin-top:12px;"><button type="submit">Save Google News</button></div>
+</form>
+
+{% set s = sources['rss'] %}
+<form method="post" action="{{ url_for('monitor_source_save', name='rss') }}" id="src-rss" class="panel">
+  <div class="row between" style="margin-bottom:8px;">
+    <h2 style="margin:0;">RSS / Atom feeds</h2>
+    {% if s.enabled %}<span class="pill on">on</span>{% else %}<span class="pill off">off</span>{% endif %}
+  </div>
+  <p class="small muted">Specific feeds you want to follow — outlets, blogs, government pages, anything with a feed URL.</p>
+  <label class="row" style="margin-bottom:14px;">
+    <input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}>
+    <span class="small" style="margin-left:6px;text-transform:none;letter-spacing:normal;font-size:13px;">Enabled</span>
+  </label>
+  <div class="field">
+    <label>Feed URLs (one per line)</label>
+    <textarea name="feeds" rows="6">{{ (s.config.get('feeds') or []) | join('\n') }}</textarea>
+  </div>
+  <div style="margin-top:12px;"><button type="submit">Save RSS</button></div>
+</form>
+
+{% set s = sources['reddit'] %}
+<form method="post" action="{{ url_for('monitor_source_save', name='reddit') }}" id="src-reddit" class="panel">
+  <div class="row between" style="margin-bottom:8px;">
+    <h2 style="margin:0;">Reddit</h2>
+    {% if s.enabled %}<span class="pill on">on</span>{% else %}<span class="pill off">off</span>{% endif %}
+  </div>
+  <p class="small muted">Free API. Get credentials at <a href="https://www.reddit.com/prefs/apps" target="_blank">reddit.com/prefs/apps</a> (pick "script"). Leave subreddits blank to search r/all.</p>
+  <label class="row" style="margin-bottom:14px;">
+    <input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}>
+    <span class="small" style="margin-left:6px;text-transform:none;letter-spacing:normal;font-size:13px;">Enabled</span>
+  </label>
+  <div class="field-row cols-3">
+    <div class="field"><label>Client ID</label><input type="text" name="client_id" value="{{ s.config.get('client_id', '') }}"></div>
+    <div class="field"><label>Client secret</label><input type="password" name="client_secret" value="{{ s.config.get('client_secret', '') }}"></div>
+    <div class="field"><label>User agent</label><input type="text" name="user_agent" value="{{ s.config.get('user_agent', 'osint-monitor/0.1') }}"></div>
+  </div>
+  <div class="field">
+    <label>Subreddits (one per line, no r/)</label>
+    <textarea name="subreddits" rows="4">{{ (s.config.get('subreddits') or []) | join('\n') }}</textarea>
+  </div>
+  <div class="field-row cols-2">
+    <div class="field"><label>Limit per query</label><input type="number" name="limit" value="{{ s.config.get('limit', 25) }}"></div>
+  </div>
+  <div style="margin-top:12px;"><button type="submit">Save Reddit</button></div>
+</form>
+
+{% set s = sources['bluesky'] %}
+<form method="post" action="{{ url_for('monitor_source_save', name='bluesky') }}" id="src-bluesky" class="panel">
+  <div class="row between" style="margin-bottom:8px;">
+    <h2 style="margin:0;">Bluesky</h2>
+    {% if s.enabled %}<span class="pill on">on</span>{% else %}<span class="pill off">off</span>{% endif %}
+  </div>
+  <p class="small muted">Public search endpoint — no credentials. Searches use your topic keywords directly.</p>
+  <label class="row" style="margin-bottom:14px;">
+    <input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}>
+    <span class="small" style="margin-left:6px;text-transform:none;letter-spacing:normal;font-size:13px;">Enabled</span>
+  </label>
+  <div class="field-row cols-2">
+    <div class="field"><label>Limit per term</label><input type="number" name="limit_per_term" value="{{ s.config.get('limit_per_term', 50) }}"></div>
+  </div>
+  <div style="margin-top:12px;"><button type="submit">Save Bluesky</button></div>
+</form>
+
+{% set s = sources['mastodon'] %}
+<form method="post" action="{{ url_for('monitor_source_save', name='mastodon') }}" id="src-mastodon" class="panel">
+  <div class="row between" style="margin-bottom:8px;">
+    <h2 style="margin:0;">Mastodon</h2>
+    {% if s.enabled %}<span class="pill on">on</span>{% else %}<span class="pill off">off</span>{% endif %}
+  </div>
+  <label class="row" style="margin-bottom:14px;">
+    <input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}>
+    <span class="small" style="margin-left:6px;text-transform:none;letter-spacing:normal;font-size:13px;">Enabled</span>
+  </label>
+  <div class="field-row cols-2">
+    <div class="field"><label>Instance URL</label><input type="text" name="instance_url" value="{{ s.config.get('instance_url', 'https://mastodon.social') }}"></div>
+    <div class="field"><label>Access token (optional)</label><input type="password" name="access_token" value="{{ s.config.get('access_token', '') }}"></div>
+  </div>
+  <div class="field">
+    <label>Hashtags (one per line, without #) — blank to use topic keywords</label>
+    <textarea name="hashtags" rows="3">{{ (s.config.get('hashtags') or []) | join('\n') }}</textarea>
+  </div>
+  <div class="field-row cols-2">
+    <div class="field"><label>Limit per hashtag</label><input type="number" name="limit_per_hashtag" value="{{ s.config.get('limit_per_hashtag', 40) }}"></div>
+  </div>
+  <div style="margin-top:12px;"><button type="submit">Save Mastodon</button></div>
+</form>
+
+{% set s = sources['x_twitter'] %}
+<form method="post" action="{{ url_for('monitor_source_save', name='x_twitter') }}" id="src-x_twitter" class="panel">
+  <div class="row between" style="margin-bottom:8px;">
+    <h2 style="margin:0;">X / Twitter</h2>
+    {% if s.enabled %}<span class="pill on">on</span>{% else %}<span class="pill off">off</span>{% endif %}
+  </div>
+  <p class="small muted">Requires the paid X API v2 Basic tier (~$200/mo). Once you have a bearer token, paste it below; queries use your topic keywords plus anything extra you add here.</p>
+  <label class="row" style="margin-bottom:14px;">
+    <input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}>
+    <span class="small" style="margin-left:6px;text-transform:none;letter-spacing:normal;font-size:13px;">Enabled</span>
+  </label>
+  <div class="field">
+    <label>Bearer token</label>
+    <input type="password" name="bearer_token" value="{{ s.config.get('bearer_token', '') }}">
+  </div>
+  <div class="field">
+    <label>Extra search queries (one per line)</label>
+    <textarea name="search_queries" rows="4">{{ (s.config.get('search_queries') or []) | join('\n') }}</textarea>
+  </div>
+  <div class="field-row cols-2">
+    <div class="field"><label>Max results per query</label><input type="number" name="max_results_per_query" value="{{ s.config.get('max_results_per_query', 50) }}"></div>
+  </div>
+  <div style="margin-top:12px;"><button type="submit">Save X / Twitter</button></div>
+</form>
+
+{% endblock %}

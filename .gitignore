@@ -1,0 +1,45 @@
+# Virtualenv
+.venv/
+venv/
+env/
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.Python
+build/
+dist/
+
+# Local state (regenerated on first run)
+monitor.db
+osint.db
+*.db-journal
+exports/
+
+# SpiderFoot clone (user installs separately per README)
+spiderfoot/
+
+# Archived feed-scraper code (kept locally for reference, not in public repo)
+_archive/
+
+# Local config that may contain secrets
+config.yaml
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor cruft
+.vscode/
+.idea/
+*.swp
+*~
+
+# Test/temp
+*.log
+/tmp/
+.coverage
+.pytest_cache/

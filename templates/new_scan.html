@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}New scan · OSINT{% endblock %}
+{% block content %}
+
+<h1>New scan</h1>
+<p class="muted">Pick a target type, give SpiderFoot something to investigate, and choose how thorough you want it to be.</p>
+
+<form method="post" action="{{ url_for('scans_new') }}">
+  <div class="panel">
+    <h3>1. What kind of target?</h3>
+    <div class="grid grid-3" style="margin-top:10px;">
+      {% for p in presets %}
+        <label class="panel" style="cursor:pointer;margin:0;padding:14px;border:1px solid var(--border-2);">
+          <div class="row" style="align-items:flex-start;">
+            <input type="radio" name="preset" value="{{ p.id }}" {% if loop.first %}checked{% endif %} required>
+            <div>
+              <div style="font-weight:600;color:var(--text);">{{ p.label }}</div>
+              <div class="small">{{ p.help }}</div>
+              <div class="small mono" style="margin-top:4px;color:var(--muted-2);">
+                example: {{ p.placeholder }}
+              </div>
+            </div>
+          </div>
+        </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>2. The target</h3>
+    <div class="field-row cols-2">
+      <div class="field">
+        <label>Target value</label>
+        <input type="text" name="target" placeholder="e.g. example.com" required autofocus>
+      </div>
+      <div class="field">
+        <label>Scan name (optional)</label>
+        <input type="text" name="name" placeholder="auto-generated if blank">
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>3. How thorough?</h3>
+    <div class="field-row cols-3">
+      <label class="panel" style="cursor:pointer;margin:0;padding:12px;">
+        <input type="radio" name="usecase" value="Passive">
+        <b>Passive</b>
+        <div class="small">Only uses sources that don't touch the target. Safest, but slower to find things.</div>
+      </label>
+      <label class="panel" style="cursor:pointer;margin:0;padding:12px;">
+        <input type="radio" name="usecase" value="Investigate">
+        <b>Investigate</b>
+        <div class="small">Balanced. Active queries against the target plus public data sources.</div>
+      </label>
+      <label class="panel" style="cursor:pointer;margin:0;padding:12px;">
+        <input type="radio" name="usecase" value="All" checked>
+        <b>All</b>
+        <div class="small">Run every available module. Most thorough, also noisiest.</div>
+      </label>
+    </div>
+    <p class="small" style="margin-top:8px;">Leave blank to use the preset's default for that target type.</p>
+  </div>
+
+  <div class="row">
+    <button type="submit">Start scan</button>
+    <a class="btn ghost" href="{{ url_for('scans') }}">Cancel</a>
+  </div>
+</form>
+
+<div class="panel subtle" style="margin-top:18px;">
+  <h3>What happens next</h3>
+  <p class="small">
+    SpiderFoot kicks off the scan and starts emitting events as modules find things. The scan detail page polls every few seconds — you'll see results appear in real time, grouped by event type (subdomains, related accounts, breaches, etc.). Most scans finish in a few minutes; deep ones can take longer.
+  </p>
+</div>
+
+{% endblock %}

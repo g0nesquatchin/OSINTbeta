@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}Monitor · OSINT{% endblock %}
+{% block content %}
+
+<div class="row between" style="margin-bottom:14px;">
+  <h1 style="margin:0;">Monitor</h1>
+  <div class="row">
+    <a class="btn ghost" href="{{ url_for('monitor_topics') }}">Topics</a>
+    <a class="btn ghost" href="{{ url_for('monitor_sources_page') }}">Sources</a>
+    <a class="btn ghost" href="{{ url_for('monitor_runs') }}">Runs</a>
+  </div>
+</div>
+
+<div class="grid grid-4" style="margin-bottom:16px;">
+  <div class="panel">
+    <h3>Matches stored</h3>
+    <div style="font-size:24px;font-weight:600;">{{ stats.documents }}</div>
+    <div class="small">{{ stats.matches }} topic hits</div>
+  </div>
+  <div class="panel">
+    <h3>By source</h3>
+    {% if stats.by_source %}
+      {% for src, n in stats.by_source %}
+        <div class="row between"><span class="small">{{ source_labels.get(src, src) }}</span><span class="small">{{ n }}</span></div>
+      {% endfor %}
+    {% else %}<div class="muted small">No data yet.</div>{% endif %}
+  </div>
+  <div class="panel">
+    <h3>By topic</h3>
+    {% if stats.by_topic %}
+      {% for t, n in stats.by_topic %}
+        <div class="row between"><span class="small">{{ t }}</span><span class="small">{{ n }}</span></div>
+      {% endfor %}
+    {% else %}<div class="muted small">No data yet.</div>{% endif %}
+  </div>
+  <div class="panel">
+    <h3>Last run</h3>
+    {% if last_run %}
+      <div class="small">{{ last_run.finished_at or last_run.started_at }}</div>
+      <div class="small muted">scanned {{ last_run.scanned }} · matched {{ last_run.matched }} · new {{ last_run.new_docs }}</div>
+      {% if last_run.error %}<div class="small danger">err: {{ last_run.error }}</div>{% endif %}
+    {% else %}<div class="muted small">No runs yet.</div>{% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <div class="row between">
+    <div>
+      <h2 style="margin:0 0 4px;">Run now</h2>
+      <div class="small muted">Triggers a manual collection pass across enabled sources.</div>
+    </div>
+    <form method="post" action="{{ url_for('monitor_run') }}">
+      <button type="submit" {% if run.running %}disabled{% endif %}>
+        {% if run.running %}Running…{% else %}Run collection{% endif %}
+      </button>
+    </form>
+  </div>
+  <div id="runstatus" class="small" style="margin-top:10px;">
+    {% if run.running %}
+      <span class="pill run"><span class="dot"></span>running</span>
+      on <b>{{ run.current_source }}</b> · scanned {{ run.scanned }} · matched {{ run.matched }} · new {{ run.new }}
+    {% else %}
+      <span class="pill off">idle</span>
+    {% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <div class="row between" style="margin-bottom:8px;">
+    <h2 style="margin:0;">Scheduler</h2>
+    {% if scheduler_enabled %}
+      <span class="pill on"><span class="dot"></span>on, every {{ scheduler_interval }} min</span>
+    {% else %}
+      <span class="pill off">off</span>
+    {% endif %}
+  </div>
+  <form method="post" action="{{ url_for('monitor_scheduler_save') }}" class="row" style="align-items:end;gap:14px;">
+    <label class="row" style="margin:0;">
+      <input type="checkbox" name="enabled" {% if scheduler_enabled %}checked{% endif %}>
+      <span class="small" style="margin-left:6px;text-transform:none;letter-spacing:normal;font-size:13px;">Enabled</span>
+    </label>
+    <div>
+      <label>Interval (minutes, min 5)</label>
+      <input type="number" name="interval_min" value="{{ scheduler_interval }}" min="5" style="width:120px;">
+    </div>
+    <button class="secondary" type="submit">Save scheduler</button>
+    {% if scheduler_next %}
+      <div class="small muted">Next run: {{ scheduler_next }}</div>
+    {% endif %}
+  </form>
+</div>
+
+<div class="panel">
+  <form method="get" action="{{ url_for('monitor') }}" class="row" style="gap:10px;align-items:end;">
+    <div style="flex:2;min-width:240px;">
+      <label>Search text</label>
+      <input type="text" name="q" value="{{ q }}" placeholder="keyword, phrase…">
+    </div>
+    <div>
+      <label>Topic</label>
+      <select name="topic_id">
+        <option value="">(any)</option>
+        {% for t in topics %}
+          <option value="{{ t.id }}" {% if t.id|string == topic_id|string %}selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>Source</label>
+      <select name="source">
+        <option value="">(any)</option>
+        {% for s in all_sources %}
+          <option value="{{ s }}" {% if s==source %}selected{% endif %}>{{ source_labels.get(s, s) }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>Since</label>
+      <input type="date" name="since" value="{{ since }}">
+    </div>
+    <div>
+      <label>Limit</label>
+      <input type="number" name="limit" value="{{ limit }}" min="1" max="1000" style="width:90px;">
+    </div>
+    <button type="submit">Filter</button>
+  </form>
+</div>
+
+<div class="panel" style="padding:0;">
+  {% if rows %}
+    <table>
+      <thead>
+        <tr><th>Source</th><th>Author</th><th>Title / content</th><th>Topics</th><th>When</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td><span class="tag">{{ r.source }}</span></td>
+            <td class="small">{{ r.author }}</td>
+            <td>
+              <div>{{ (r.title or r.content) | short(200) }}</div>
+              {% if r.url %}<div class="small muted">{{ r.url[:80] }}</div>{% endif %}
+            </td>
+            <td class="small">{{ r.topics or '' }}</td>
+            <td class="small">{{ r.created_at or r.collected_at or '' }}</td>
+            <td>{% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">open ↗</a>{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="empty">
+      <h2>No matches yet</h2>
+      <p>Set up topics with keywords, enable at least one source, and run a collection.</p>
+      <div class="cta">
+        <a class="btn" href="{{ url_for('monitor_topics') }}">Manage topics</a>
+        <a class="btn secondary" href="{{ url_for('monitor_sources_page') }}">Configure sources</a>
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+<script>
+async function poll() {
+  try {
+    const r = await fetch("{{ url_for('monitor_status') }}");
+    const s = await r.json();
+    const el = document.getElementById('runstatus');
+    if (s.running) {
+      el.innerHTML = `<span class="pill run"><span class="dot"></span>running</span> on <b>${s.current_source||'…'}</b> · scanned ${s.scanned} · matched ${s.matched} · new ${s.new}`;
+      setTimeout(poll, 2500);
+    } else if (s.finished_at) {
+      window.location.reload();
+    }
+  } catch (e) {}
+}
+{% if run.running %}poll();{% endif %}
+</script>
+
+{% endblock %}

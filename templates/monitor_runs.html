@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Runs · Monitor · OSINT{% endblock %}
+{% block content %}
+
+<div class="small"><a href="{{ url_for('monitor') }}">← Monitor</a></div>
+<h1>Collection runs</h1>
+<p class="muted">History of every monitor collection pass, manual or scheduled.</p>
+
+{% if not runs %}
+  <div class="panel">
+    <div class="empty"><p>No runs yet.</p></div>
+  </div>
+{% else %}
+  <div class="panel" style="padding:0;">
+    <table>
+      <thead>
+        <tr>
+          <th>Started</th><th>Finished</th><th>Scanned</th>
+          <th>Matched</th><th>New</th><th>Sources</th><th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in runs %}
+          <tr>
+            <td class="small nowrap">{{ r.started_at }}</td>
+            <td class="small nowrap">{{ r.finished_at or '—' }}</td>
+            <td>{{ r.scanned }}</td>
+            <td>{{ r.matched }}</td>
+            <td>{{ r.new_docs }}</td>
+            <td class="small">{{ r.sources_json or '' }}</td>
+            <td class="small {{ 'danger' if r.error else '' }}">{{ r.error or '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Topics · Monitor · OSINT{% endblock %}
+{% block content %}
+
+<div class="row between" style="margin-bottom:14px;">
+  <div>
+    <div class="small"><a href="{{ url_for('monitor') }}">← Monitor</a></div>
+    <h1 style="margin:4px 0 0;">Topics</h1>
+  </div>
+  <a class="btn" href="{{ url_for('monitor_topic_new') }}">+ New topic</a>
+</div>
+
+<p class="muted">A topic is a named group of keywords. Documents collected by any enabled source are checked against every topic — matches are tagged with the topic's name and persisted.</p>
+
+{% if not topics %}
+  <div class="panel">
+    <div class="empty">
+      <h2>No topics yet</h2>
+      <p>Create one to start filtering collected content.</p>
+      <div class="cta"><a class="btn" href="{{ url_for('monitor_topic_new') }}">Create your first topic</a></div>
+    </div>
+  </div>
+{% else %}
+  <div class="panel" style="padding:0;">
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Match mode</th><th>Keywords</th><th>Count</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for t in topics %}
+          <tr>
+            <td><a href="{{ url_for('monitor_topic_edit', topic_id=t.id) }}">{{ t.name }}</a></td>
+            <td class="small">{{ t.match_mode }}</td>
+            <td class="small">{{ (t.keywords|join(', ')) | truncate(120, end='…') }}</td>
+            <td class="small">{{ t.keywords|length }}</td>
+            <td><a class="btn secondary" href="{{ url_for('monitor_topic_edit', topic_id=t.id) }}">Edit</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+{% endblock %}

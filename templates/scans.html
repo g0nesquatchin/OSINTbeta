@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Scans · OSINT{% endblock %}
+{% block content %}
+
+<div class="row between" style="margin-bottom:16px;">
+  <h1 style="margin:0;">Scans</h1>
+  <a class="btn" href="{{ url_for('scans_new') }}">+ New scan</a>
+</div>
+
+{% if not scans %}
+  <div class="panel">
+    <div class="empty">
+      <h2>No scans yet</h2>
+      <p>Start an investigation by picking a target — a domain, an email, a username, an IP, or a person.</p>
+      <div class="cta"><a class="btn" href="{{ url_for('scans_new') }}">Start your first scan</a></div>
+    </div>
+  </div>
+{% else %}
+  <div class="panel" style="padding:0;">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Target</th>
+          <th>Started</th>
+          <th>Ended</th>
+          <th>Status</th>
+          <th class="nowrap">Results</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in scans %}
+          <tr>
+            <td><a href="{{ url_for('scan_detail', scan_id=s.id) }}">{{ s.name }}</a></td>
+            <td class="mono"><span class="truncate">{{ s.target }}</span></td>
+            <td class="small nowrap">{{ s.started | ts }}</td>
+            <td class="small nowrap">{{ s.ended | ts }}</td>
+            <td>
+              {% if s.status in running_states %}
+                <span class="pill run"><span class="dot"></span>{{ s.status|lower }}</span>
+              {% elif s.status == 'FINISHED' %}
+                <span class="pill on">finished</span>
+              {% elif s.status == 'ABORTED' %}
+                <span class="pill off">aborted</span>
+              {% else %}
+                <span class="pill err">{{ s.status|lower }}</span>
+              {% endif %}
+            </td>
+            <td class="nowrap">{{ s.elements }}</td>
+            <td class="nowrap">
+              <a class="btn secondary" href="{{ url_for('scan_detail', scan_id=s.id) }}">Open</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+{% endblock %}

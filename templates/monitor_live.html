@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+{% block title %}Live · OSINT{% endblock %}
+{% block content %}
+
+<div class="row between" style="margin-bottom:14px;">
+  <div>
+    <h1 style="margin:0 0 2px;">Live news stream</h1>
+    <div class="small muted">
+      Pick a topic and (optionally) the regions you want to focus on.
+      Every enabled source fires when you hit Pull. News sources filter
+      to your selected regions; social sources don't have country tags
+      and pull globally.
+    </div>
+  </div>
+</div>
+
+<!-- Source status panel ------------------------------------------ -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 style="margin:0;">Sources that will run</h2>
+    <a href="{{ url_for('monitor_sources_page') }}" class="small">Configure →</a>
+  </div>
+  <div class="row" style="gap:8px;flex-wrap:wrap;">
+    {% for s in source_statuses %}
+      {% if s.enabled and s.configured %}
+        <span class="pill on" title="enabled and configured">
+          <span class="dot"></span>{{ s.label }}{% if s.geo_aware %} · geo{% endif %}
+        </span>
+      {% elif s.enabled and not s.configured %}
+        <span class="pill warn" title="{{ s.hint }}">
+          {{ s.label }} · {{ s.hint }}
+        </span>
+      {% else %}
+        <span class="pill off">{{ s.label }} · off</span>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% set enabled_ok = source_statuses | selectattr('enabled') | selectattr('configured') | list %}
+  {% if not enabled_ok %}
+    <div class="flash error" style="margin-top:12px;">
+      No source is both enabled and configured. Enable GDELT and Google News
+      under <a href="{{ url_for('monitor_sources_page') }}">Sources</a> first
+      (they're free and need no setup).
+    </div>
+  {% endif %}
+</div>
+
+<!-- Run form ---------------------------------------------------- -->
+<div class="panel">
+  <form id="liveForm" onsubmit="return startRun(event)">
+    <div class="field">
+      <label>Topic</label>
+      <select id="topicSel" name="topic_id" style="max-width:480px;">
+        <option value="">(all topics)</option>
+        {% for t in topics %}
+          <option value="{{ t.id }}" {% if last_topic_id and t.id==last_topic_id %}selected{% endif %}>{{ t.name }} — {{ t.keywords|length }} kw</option>
+        {% endfor %}
+      </select>
+      {% if not topics %}
+        <div class="small muted" style="margin-top:6px;">
+          No topics yet — <a href="{{ url_for('monitor_topic_new') }}">create one</a> first.
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="field">
+      <div class="row between" style="margin-bottom:6px;">
+        <label style="margin:0;">Regions ({{ countries|length }} countries)</label>
+        <div class="row" style="gap:6px;flex-wrap:wrap;">
+          <button type="button" class="ghost small" onclick="pickPreset('all')">All</button>
+          <button type="button" class="ghost small" onclick="pickPreset('none')">None</button>
+          {% for region in countries_by_region.keys() %}
+            <button type="button" class="ghost small" onclick="pickPreset({{ region|tojson }})">{{ region }}</button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <input type="text" id="countrySearch" placeholder="Filter countries… (e.g. United, Germ, JP)" autocomplete="off" style="margin-bottom:8px;">
+
+      <div class="grid grid-3" id="countryList" style="gap:4px;max-height:280px;overflow:auto;padding:10px;border:1px solid var(--border-2);border-radius:6px;background:var(--bg-2);">
+        {% for c in countries %}
+          <label class="country-row row" data-name="{{ c.name|lower }}" data-code="{{ c.code|lower }}" data-region="{{ c.region }}"
+                 style="gap:6px;align-items:center;cursor:pointer;font-size:13px;padding:3px 4px;">
+            <input type="checkbox" name="country" value="{{ c.code }}" {% if c.code in last_regions %}checked{% endif %}>
+            <span>{{ c.name }}</span>
+            <span class="small muted" style="margin-left:auto;font-family:ui-monospace,monospace;">{{ c.code }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <div class="small muted" style="margin-top:6px;">
+        <span id="countryFilterStatus">{{ countries|length }} shown</span>
+        · <span id="countrySelectedCount">0 selected</span>
+        · Empty selection = pull from everywhere (news sources only honor this).
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:14px;">
+      <button type="submit" id="startBtn" {% if run.running %}disabled{% endif %}>
+        {% if run.running %}Running…{% else %}Pull now{% endif %}
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- Stream ------------------------------------------------------- -->
+<div class="panel">
+  <div class="row between">
+    <h2 style="margin:0;">Stream</h2>
+    <div class="small">
+      <span class="pill off" id="streamPill">idle</span>
+      <span id="streamCounts" style="margin-left:6px;"></span>
+    </div>
+  </div>
+  <div id="stream" style="margin-top:12px;">
+    <div class="empty"><p>No items yet. Pick a topic, optionally pick regions, click Pull.</p></div>
+  </div>
+</div>
+
+<script>
+const seen = new Set();
+let polling = false;
+
+// ---- run controls ---------------------------------------------
+
+async function startRun(ev) {
+  ev.preventDefault();
+  const form = document.getElementById('liveForm');
+  const data = new FormData(form);
+  seen.clear();
+  document.getElementById('stream').innerHTML =
+    '<div class="muted small">Starting…</div>';
+  try {
+    const r = await fetch('/monitor/live/start', { method: 'POST', body: data });
+    const out = await r.json();
+    if (!r.ok || !out.ok) {
+      alert(out.error || 'Could not start.');
+      document.getElementById('stream').innerHTML =
+        '<div class="empty"><p>Failed to start. ' + escapeHtml(out.error || '') + '</p></div>';
+      return false;
+    }
+  } catch (e) {
+    alert('Network error: ' + e.message);
+    return false;
+  }
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('startBtn').textContent = 'Running…';
+  pollOnce();
+  return false;
+}
+
+async function pollOnce() {
+  if (polling) return;
+  polling = true;
+  try {
+    const r = await fetch('/monitor/status');
+    const s = await r.json();
+    renderStatus(s);
+    appendMatches(s.recent || []);
+    if (s.running) {
+      setTimeout(() => { polling = false; pollOnce(); }, 1500);
+    } else {
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('startBtn').textContent = 'Pull now';
+      polling = false;
+      if (s.error) {
+        document.getElementById('stream').insertAdjacentHTML('afterbegin',
+          `<div class="flash error">Run finished with error: ${escapeHtml(s.error)}</div>`);
+      } else if ((s.recent||[]).length === 0) {
+        document.getElementById('stream').innerHTML =
+          `<div class="empty"><p>Run finished but no matches were produced.<br>
+           <span class="small">Common causes: topic keywords don't match any current articles in those regions,
+           or only social sources (no geo) are enabled while you've selected regions.</span></p></div>`;
+      }
+    }
+  } catch (e) {
+    polling = false;
+    setTimeout(pollOnce, 3000);
+  }
+}
+
+function renderStatus(s) {
+  const pill = document.getElementById('streamPill');
+  if (s.running) {
+    pill.className = 'pill run';
+    pill.innerHTML = '<span class="dot"></span>running · ' + escapeHtml(s.current_source || '');
+  } else if (s.finished_at) {
+    pill.className = 'pill on';
+    pill.textContent = 'finished';
+  } else {
+    pill.className = 'pill off';
+    pill.textContent = 'idle';
+  }
+  document.getElementById('streamCounts').textContent =
+    `scanned ${s.scanned} · matched ${s.matched} · new ${s.new}`;
+}
+
+function appendMatches(items) {
+  if (!items.length) return;
+  const root = document.getElementById('stream');
+  if (root.querySelector('.empty') || root.querySelector('.muted.small')) root.innerHTML = '';
+  const newPieces = [];
+  for (const m of items.slice().reverse()) {
+    const key = (m.url || '') + '::' + (m.title || '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    newPieces.push(renderItem(m));
+  }
+  if (newPieces.length) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = newPieces.reverse().join('');
+    while (wrap.firstChild) root.insertBefore(wrap.firstChild, root.firstChild);
+  }
+}
+
+function renderItem(m) {
+  const isNew = m.is_new !== false;
+  const newBadge = isNew
+    ? '<span class="pill on" style="font-size:10px;padding:1px 6px;">new</span>'
+    : '<span class="pill off" style="font-size:10px;padding:1px 6px;">dup</span>';
+  const country = m.country
+    ? `<span class="tag" style="font-family:ui-monospace,monospace;">${escapeHtml(m.country)}</span>`
+    : '';
+  const topics = (m.topics || []).map(t =>
+    `<span class="tag">${escapeHtml(t)}</span>`).join('');
+  const title = m.url
+    ? `<a href="${escapeHtml(m.url)}" target="_blank" rel="noopener">${escapeHtml(m.title || m.url)}</a>`
+    : escapeHtml(m.title || '');
+  return `
+    <div class="stream-item" style="padding:10px 0;border-bottom:1px solid var(--border);animation:fadein .25s ease;">
+      <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;">
+        ${newBadge}
+        <span class="tag">${escapeHtml(m.source || '')}</span>
+        ${country}
+        ${topics}
+        <span class="small muted" style="margin-left:auto;">${escapeHtml(m.author || '')}</span>
+      </div>
+      <div style="margin-top:4px;">${title}</div>
+    </div>
+  `;
+}
+
+function escapeHtml(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ---- country search + selection ------------------------------
+
+function applyFilter() {
+  const q = (document.getElementById('countrySearch').value || '').toLowerCase().trim();
+  let shown = 0;
+  document.querySelectorAll('#countryList .country-row').forEach(row => {
+    const visible = !q
+      || row.dataset.name.includes(q)
+      || row.dataset.code.includes(q)
+      || row.dataset.region.toLowerCase().includes(q);
+    row.style.display = visible ? '' : 'none';
+    if (visible) shown++;
+  });
+  document.getElementById('countryFilterStatus').textContent = shown + ' shown';
+}
+
+function updateSelectedCount() {
+  const n = document.querySelectorAll('#countryList input[name="country"]:checked').length;
+  document.getElementById('countrySelectedCount').textContent = n + ' selected';
+}
+
+function pickPreset(name) {
+  const boxes = document.querySelectorAll('#countryList input[name="country"]');
+  if (name === 'all') {
+    boxes.forEach(b => {
+      if (b.closest('label').style.display !== 'none') b.checked = true;
+    });
+  } else if (name === 'none') {
+    boxes.forEach(b => b.checked = false);
+  } else {
+    // Toggle a region group (limited to currently-visible rows)
+    boxes.forEach(b => {
+      const label = b.closest('label');
+      if (label.dataset.region === name && label.style.display !== 'none') {
+        b.checked = true;
+      }
+    });
+  }
+  updateSelectedCount();
+}
+
+document.getElementById('countrySearch').addEventListener('input', applyFilter);
+document.querySelectorAll('#countryList input[name="country"]').forEach(box => {
+  box.addEventListener('change', updateSelectedCount);
+});
+updateSelectedCount();
+
+{% if run.running %}pollOnce();{% endif %}
+</script>
+
+<style>
+@keyframes fadein { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+button.small { padding: 2px 8px; font-size: 12px; font-weight: 500; }
+</style>
+
+{% endblock %}

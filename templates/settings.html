@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Settings · OSINT{% endblock %}
+{% block content %}
+
+<h1>Settings</h1>
+
+<div class="grid grid-2">
+  <div class="panel">
+    <h2>SpiderFoot</h2>
+    <table>
+      <tr><td>Status</td><td>
+        {% if sf.reachable %}<span class="pill on">reachable</span>
+        {% elif sf.installed %}<span class="pill warn">installed, not running</span>
+        {% else %}<span class="pill err">not installed</span>{% endif %}
+      </td></tr>
+      <tr><td>Install path</td><td class="mono small">{{ sf.sf_path or '—' }}</td></tr>
+      <tr><td>Listening on</td><td class="mono small">{{ sf.base_url }}</td></tr>
+      <tr><td>PID</td><td>{{ sf.pid or '—' }}</td></tr>
+    </table>
+    <p class="small" style="margin-top:10px;">
+      Need to configure API keys for individual modules (Shodan, VirusTotal, HIBP, etc.)?
+      That's done inside SpiderFoot itself — open it directly:
+    </p>
+    <a class="btn secondary" href="{{ sf.base_url }}/optsraw" target="_blank" rel="noopener">SpiderFoot settings ↗</a>
+    {% if not sf.installed %}
+      <div style="margin-top:10px;"><a class="btn" href="{{ url_for('setup') }}">Install SpiderFoot</a></div>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Sherlock</h2>
+    <p class="small">Used by the <a href="{{ url_for('investigate') }}">Usernames</a> tab for handle lookups across hundreds of platforms.</p>
+    <table>
+      <tr><td>Installed</td><td>
+        {% if sherlock_installed %}<span class="pill on">yes</span>
+        {% else %}<span class="pill off">no</span>{% endif %}
+      </td></tr>
+    </table>
+    {% if not sherlock_installed %}
+      <p class="small" style="margin-top:10px;">Install in your active virtualenv:</p>
+      <pre style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:10px;"><code>pip install sherlock-project</code></pre>
+    {% endif %}
+  </div>
+</div>
+
+<div class="panel subtle">
+  <h3>About this app</h3>
+  <p class="small">
+    A thin, opinionated UI over SpiderFoot for target-driven OSINT investigations,
+    plus Sherlock for username lookups and a curated launchpad for the wider tool
+    ecosystem. SpiderFoot does the heavy lifting; this app exists to make the
+    common workflows fast.
+  </p>
+</div>
+
+{% endblock %}

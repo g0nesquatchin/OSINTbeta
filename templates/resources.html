@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Resources · OSINT{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>Resources</h2>
+  <div class="small">
+    A launchpad for the wider OSINT ecosystem. This tool covers continuous
+    keyword monitoring and username lookups; the links below cover everything
+    else.
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="panel">
+    <h3 style="color:var(--text);">OSINT Framework</h3>
+    <p class="small">
+      A categorized directory of hundreds of OSINT tools — usernames, emails,
+      domains, images, geolocation, dark web, language analysis, archives.
+      Start here when you have a specific lead and need the right tool.
+    </p>
+    <p><a class="btn" href="https://osintframework.com" target="_blank" rel="noopener">Open OSINT Framework ↗</a></p>
+  </div>
+
+  <div class="panel">
+    <h3 style="color:var(--text);">TraceLabs</h3>
+    <p class="small">
+      Volunteer organization that runs crowdsourced OSINT events (Search Party
+      CTFs) to help generate leads on real missing-person cases. The findings
+      are passed to law enforcement. If you want your OSINT work to directly
+      help locate missing people, this is the channel.
+    </p>
+    <p>
+      <a class="btn" href="https://www.tracelabs.org" target="_blank" rel="noopener">tracelabs.org ↗</a>
+      <a class="btn secondary" href="https://www.tracelabs.org/initiatives/search-party" target="_blank" rel="noopener">Search Party CTF ↗</a>
+    </p>
+  </div>
+
+  <div class="panel">
+    <h3 style="color:var(--text);">NCMEC CyberTipline</h3>
+    <p class="small">
+      U.S. National Center for Missing &amp; Exploited Children. The official
+      reporting channel for suspected online child exploitation. Reports here
+      go to the right law-enforcement teams.
+    </p>
+    <p><a class="btn" href="https://report.cybertip.org" target="_blank" rel="noopener">report.cybertip.org ↗</a></p>
+  </div>
+
+  <div class="panel">
+    <h3 style="color:var(--text);">SpiderFoot</h3>
+    <p class="small">
+      Heavyweight automated reconnaissance against a single target (domain,
+      IP, email, name) using ~200 modules. Runs as its own web server.
+      Use it for deep one-target dives; use this app for continuous keyword
+      monitoring across feeds.
+    </p>
+    <p><a class="btn" href="https://www.spiderfoot.net" target="_blank" rel="noopener">spiderfoot.net ↗</a></p>
+  </div>
+
+  <div class="panel">
+    <h3 style="color:var(--text);">Username lookup</h3>
+    <p class="small">
+      Built in to this app — see the <a href="{{ url_for('investigate') }}">Investigate</a>
+      tab. Powered by Sherlock.
+    </p>
+    <p class="small muted">
+      Other handle-search options: WhatsMyName, Maigret, NameChk.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h3 style="color:var(--text);">Image &amp; geolocation</h3>
+    <ul class="small" style="margin:0 0 0 18px;line-height:1.7;">
+      <li><a href="https://images.google.com" target="_blank" rel="noopener">Google Reverse Image</a></li>
+      <li><a href="https://yandex.com/images/" target="_blank" rel="noopener">Yandex Images</a> (often best on faces)</li>
+      <li><a href="https://tineye.com" target="_blank" rel="noopener">TinEye</a></li>
+      <li><a href="https://geohints.com" target="_blank" rel="noopener">GeoHints</a></li>
+      <li><a href="https://earth.google.com" target="_blank" rel="noopener">Google Earth</a></li>
+    </ul>
+  </div>
+
+  <div class="panel">
+    <h3 style="color:var(--text);">Archives &amp; deleted content</h3>
+    <ul class="small" style="margin:0 0 0 18px;line-height:1.7;">
+      <li><a href="https://web.archive.org" target="_blank" rel="noopener">Wayback Machine</a></li>
+      <li><a href="https://archive.ph" target="_blank" rel="noopener">archive.today</a></li>
+      <li><a href="https://cachedview.com" target="_blank" rel="noopener">CachedView</a></li>
+    </ul>
+  </div>
+
+  <div class="panel">
+    <h3 style="color:var(--text);">Domain &amp; infrastructure</h3>
+    <ul class="small" style="margin:0 0 0 18px;line-height:1.7;">
+      <li><a href="https://whois.domaintools.com" target="_blank" rel="noopener">DomainTools WHOIS</a></li>
+      <li><a href="https://crt.sh" target="_blank" rel="noopener">crt.sh</a> (certificate transparency)</li>
+      <li><a href="https://www.shodan.io" target="_blank" rel="noopener">Shodan</a></li>
+      <li><a href="https://urlscan.io" target="_blank" rel="noopener">urlscan.io</a></li>
+      <li><a href="https://securitytrails.com" target="_blank" rel="noopener">SecurityTrails</a></li>
+    </ul>
+  </div>
+
+  <div class="panel">
+    <h3 style="color:var(--text);">Breached / leaked data</h3>
+    <ul class="small" style="margin:0 0 0 18px;line-height:1.7;">
+      <li><a href="https://haveibeenpwned.com" target="_blank" rel="noopener">Have I Been Pwned</a> (email exposure)</li>
+      <li><a href="https://dehashed.com" target="_blank" rel="noopener">Dehashed</a></li>
+      <li><a href="https://intelx.io" target="_blank" rel="noopener">Intelligence X</a></li>
+    </ul>
+    <div class="small muted" style="margin-top:6px;">
+      Some of these require accounts; check terms before using results.
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h3 style="color:var(--text);">Working responsibly</h3>
+  <p class="small">
+    OSINT is powerful and easy to misuse. A few rules that keep work legitimate
+    and useful:
+  </p>
+  <ul class="small" style="margin:0 0 0 18px;line-height:1.7;">
+    <li>Stick to information that's actually public — same view an anonymous visitor would have.</li>
+    <li>Respect platform terms of service. They differ from "legal" but matter for both you and your data's admissibility.</li>
+    <li>If you find evidence of a crime against a child, do not investigate further — report to <a href="https://report.cybertip.org" target="_blank" rel="noopener">NCMEC's CyberTipline</a> or local law enforcement immediately. Continuing to dig can compromise their case.</li>
+    <li>Username matches and similar profiles are leads, not proof. Verify before naming anyone.</li>
+    <li>Keep notes of what you saw and when. Public information disappears.</li>
+  </ul>
+</div>
+
+{% endblock %}
