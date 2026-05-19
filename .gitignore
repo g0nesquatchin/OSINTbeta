@@ -16,6 +16,7 @@ dist/
 # Local state (regenerated on first run)
 monitor.db
 osint.db
+gkg.db
 *.db-journal
 exports/
 

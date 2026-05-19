@@ -8,10 +8,14 @@ Source config:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Iterable
 
 from ..storage import Document
+
+
+log = logging.getLogger(__name__)
 
 
 def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
@@ -26,7 +30,7 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
     csec = source_config.get("client_secret")
     ua = source_config.get("user_agent") or "osint-monitor/0.1"
     if not cid or not csec:
-        print("[reddit] missing credentials, skipping")
+        log.warning("missing credentials, skipping")
         return
 
     reddit = praw.Reddit(client_id=cid, client_secret=csec, user_agent=ua)
@@ -62,6 +66,6 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
                             },
                         )
                 except Exception as e:  # pragma: no cover
-                    print(f"[reddit] search {q!r} in r/{sub_name} failed: {e}")
+                    log.warning("search %r in r/%s failed: %s", q, sub_name, e)
         except Exception as e:  # pragma: no cover
-            print(f"[reddit] r/{sub_name} unavailable: {e}")
+            log.warning("r/%s unavailable: %s", sub_name, e)

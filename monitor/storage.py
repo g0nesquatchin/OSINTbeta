@@ -65,14 +65,21 @@ CREATE TABLE IF NOT EXISTS matches (
 );
 
 CREATE TABLE IF NOT EXISTS runs (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    started_at    TEXT NOT NULL,
-    finished_at   TEXT,
-    scanned       INTEGER NOT NULL DEFAULT 0,
-    matched       INTEGER NOT NULL DEFAULT 0,
-    new_docs      INTEGER NOT NULL DEFAULT 0,
-    sources_json  TEXT,
-    error         TEXT
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at          TEXT NOT NULL,
+    finished_at         TEXT,
+    scanned             INTEGER NOT NULL DEFAULT 0,
+    matched             INTEGER NOT NULL DEFAULT 0,
+    new_docs            INTEGER NOT NULL DEFAULT 0,
+    sources_json        TEXT,
+    error               TEXT,
+    -- JSON dict {source_name: [error_message, ...]} populated by the
+    -- runner's logging handler so per-source crashes surface in the UI
+    -- instead of getting buried in stdout.
+    source_errors_json  TEXT,
+    -- JSON list of non-fatal warnings (e.g. "mastodon has no hashtag-safe
+    -- keywords"). Useful to explain a run that returned little/nothing.
+    warnings_json       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -118,7 +125,24 @@ class MonitorStore:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON;")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Apply idempotent ALTER TABLE migrations for columns added after
+        the original schema shipped. Safe to run on every startup."""
+        existing = {
+            row["name"] for row in
+            self.conn.execute("PRAGMA table_info(runs)").fetchall()
+        }
+        if "source_errors_json" not in existing:
+            self.conn.execute(
+                "ALTER TABLE runs ADD COLUMN source_errors_json TEXT"
+            )
+        if "warnings_json" not in existing:
+            self.conn.execute(
+                "ALTER TABLE runs ADD COLUMN warnings_json TEXT"
+            )
 
     def close(self) -> None:
         self.conn.close()
@@ -361,20 +385,32 @@ class MonitorStore:
         self.conn.commit()
         return cur.lastrowid
 
-    def finish_run(self, run_id: int, scanned: int, matched: int,
-                   new_docs: int, sources: list[str],
-                   error: Optional[str] = None) -> None:
+    def finish_run(
+        self,
+        run_id: int,
+        scanned: int,
+        matched: int,
+        new_docs: int,
+        sources: list[str],
+        error: Optional[str] = None,
+        source_errors: Optional[dict[str, list[str]]] = None,
+        warnings: Optional[list[str]] = None,
+    ) -> None:
         self.conn.execute(
             """
             UPDATE runs
             SET finished_at=?, scanned=?, matched=?, new_docs=?,
-                sources_json=?, error=?
+                sources_json=?, error=?,
+                source_errors_json=?, warnings_json=?
             WHERE id=?
             """,
             (
                 _iso(datetime.now(timezone.utc)),
                 scanned, matched, new_docs,
-                json.dumps(sources), error, run_id,
+                json.dumps(sources), error,
+                json.dumps(source_errors) if source_errors else None,
+                json.dumps(warnings) if warnings else None,
+                run_id,
             ),
         )
         self.conn.commit()

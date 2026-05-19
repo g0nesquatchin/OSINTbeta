@@ -29,7 +29,12 @@
       <tbody>
         {% for t in topics %}
           <tr>
-            <td><a href="{{ url_for('monitor_topic_edit', topic_id=t.id) }}">{{ t.name }}</a></td>
+            <td>
+              <a href="{{ url_for('monitor_topic_edit', topic_id=t.id) }}">{{ t.name }}</a>
+              {% if not t.keywords %}
+                <span class="pill" title="This topic has no keywords; runs scan against it but it matches nothing." style="margin-left:6px; color: var(--warn); border-color: rgba(255,184,107,.5);">no keywords</span>
+              {% endif %}
+            </td>
             <td class="small">{{ t.match_mode }}</td>
             <td class="small">{{ (t.keywords|join(', ')) | truncate(120, end='…') }}</td>
             <td class="small">{{ t.keywords|length }}</td>

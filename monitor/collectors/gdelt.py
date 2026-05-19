@@ -7,6 +7,7 @@ N days. Reference: https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/
 
 from __future__ import annotations
 
+import logging
 from typing import Iterable
 
 import requests
@@ -14,6 +15,8 @@ import requests
 from ..storage import Document
 from .base import parse_dt
 
+
+log = logging.getLogger(__name__)
 
 ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 
@@ -54,7 +57,7 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
             r.raise_for_status()
             data = r.json()
         except Exception as e:  # pragma: no cover
-            print(f"[gdelt] query for {kw!r} failed: {e}")
+            log.warning("query for %r failed: %s", kw, e)
             continue
         for art in data.get("articles", []) or []:
             url = art.get("url") or ""

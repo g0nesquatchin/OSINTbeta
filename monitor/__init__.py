@@ -12,6 +12,7 @@ Sources:
   - reddit         Reddit API (free key required)
   - bluesky        Bluesky public search (no key)
   - mastodon       Mastodon instance hashtag timeline
+  - telegram       Public Telegram channels via t.me/s/ preview, no key
   - x_twitter      X v2 API (paid Basic tier required)
 
 Not supported:
@@ -31,5 +32,5 @@ __all__ = [
 
 SOURCE_NAMES = [
     "gdelt", "google_news", "rss",
-    "reddit", "bluesky", "mastodon", "x_twitter",
+    "reddit", "bluesky", "mastodon", "telegram", "x_twitter",
 ]

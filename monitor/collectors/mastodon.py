@@ -10,6 +10,7 @@ Source config:
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Iterable
 
@@ -17,6 +18,9 @@ import requests
 
 from ..storage import Document
 from .base import parse_dt
+
+
+log = logging.getLogger(__name__)
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -30,13 +34,19 @@ def _strip_html(s: str) -> str:
 def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
     base = (source_config.get("instance_url") or "").rstrip("/")
     if not base:
-        print("[mastodon] no instance_url, skipping")
+        log.warning("no instance_url, skipping")
         return
     token = source_config.get("access_token") or ""
     hashtags = source_config.get("hashtags") or []
     if not hashtags:
         # Fall back to topic keywords that look like hashtag-safe tokens
         hashtags = [k for k in keywords if _HASHTAG_OK.match(k.replace("#", ""))]
+        if not hashtags:
+            log.warning(
+                "no hashtag-safe keywords (Mastodon needs single-word tags); "
+                "configure 'hashtags' explicitly to scan this source"
+            )
+            return
     limit = int(source_config.get("limit_per_hashtag", 40))
 
     headers = {"User-Agent": "osint-monitor/0.1"}
@@ -54,7 +64,7 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
             r.raise_for_status()
             items = r.json()
         except Exception as e:  # pragma: no cover
-            print(f"[mastodon] #{clean} failed: {e}")
+            log.warning("#%s failed: %s", clean, e)
             continue
         for item in items:
             account = item.get("account", {}) or {}

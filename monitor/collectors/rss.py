@@ -6,10 +6,14 @@ Source config:
 
 from __future__ import annotations
 
+import logging
 from typing import Iterable
 
 from ..storage import Document
 from .base import parse_dt
+
+
+log = logging.getLogger(__name__)
 
 
 def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
@@ -24,7 +28,7 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
         try:
             parsed = feedparser.parse(url)
         except Exception as e:  # pragma: no cover
-            print(f"[rss] fetch failed for {url}: {e}")
+            log.warning("fetch failed for %s: %s", url, e)
             continue
         feed_title = (parsed.feed.get("title") or url) if parsed.feed else url
         for entry in parsed.entries:

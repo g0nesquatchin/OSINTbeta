@@ -30,6 +30,26 @@
   .marker-cluster-medium div { background: rgba(255,184,107,.9); }
   .marker-cluster-large { background: rgba(255,124,124,.4); }
   .marker-cluster-large div { background: rgba(255,124,124,.95); }
+
+  /* Theme chips */
+  .theme-chip {
+    display: inline-flex; align-items: center; cursor: pointer;
+    padding: 4px 10px; border-radius: 999px; font-size: 12px;
+    border: 1px solid var(--border-2); background: var(--bg-2);
+    color: var(--text); user-select: none;
+  }
+  .theme-chip:hover { border-color: var(--accent); }
+  .theme-chip.on {
+    background: rgba(106,166,255,.15);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .top-theme-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 2px 4px; cursor: pointer; border-radius: 4px;
+  }
+  .top-theme-row:hover { background: var(--bg-3, rgba(255,255,255,.04)); }
+  .top-theme-row code { font-size: 11px; }
 </style>
 
 <div class="row between" style="margin-bottom:14px;">
@@ -67,14 +87,59 @@
         </select>
       </div>
 
-      <div class="field">
-        <label>Timespan</label>
-        <select id="timespanSel">
-          {% for ts, lbl in [('1h','last hour'),('6h','last 6 hours'),('24h','last 24 hours'),('3d','last 3 days'),('7d','last week'),('14d','last 2 weeks'),('1m','last month')] %}
-            <option value="{{ ts }}" {% if last_timespan==ts %}selected{% endif %}>{{ lbl }}</option>
-          {% endfor %}
-        </select>
-      </div>
+      <details class="field" id="filterDetails" {% if last_theme_groups or last_themes_raw or last_tone_min or last_tone_max or last_timespan and last_timespan != '7d' %}open{% endif %}>
+        <summary style="cursor:pointer;">
+          <span style="text-transform:uppercase;font-size:11px;letter-spacing:.6px;color:var(--muted);">Theme &amp; tone (optional)</span>
+          <span id="filterSummary" class="small muted" style="margin-left:6px;"></span>
+        </summary>
+
+        <div style="margin-top:10px;">
+          <div class="small" style="text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px;">Curated themes</div>
+          <div id="themeGroups" class="row" style="flex-wrap:wrap;gap:4px;">
+            {% for g in theme_groups %}
+              <label class="theme-chip" data-id="{{ g.id }}" title="{{ g.description }} · {{ g.codes|length }} codes">
+                <input type="checkbox" value="{{ g.id }}" {% if g.id in last_theme_groups %}checked{% endif %} style="display:none;">
+                <span>{{ g.label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <div class="small" style="text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px;">Raw GKG theme codes</div>
+          <input type="text" id="themesRawInput" value="{{ last_themes_raw }}"
+                 placeholder="e.g. KILL, MISSING_PERSON, WB_2477_HUMAN_TRAFFICKING_SEX_TRAFFICKING"
+                 autocomplete="off">
+          <div class="small muted" style="margin-top:4px;">
+            Comma-separated. <a href="#" id="showTopThemes">Show top themes in current data ↓</a>
+          </div>
+          <div id="topThemesPanel" class="small" style="display:none;margin-top:6px;max-height:180px;overflow:auto;border:1px solid var(--border-2);border-radius:6px;padding:8px;background:var(--bg-2);"></div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div class="small" style="text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px;">Tone bounds (-10 negative · +10 positive)</div>
+          <div class="row" style="gap:8px;">
+            <input type="number" id="toneMinInput" value="{{ last_tone_min }}" step="0.5" min="-100" max="100" placeholder="min" style="width:90px;">
+            <input type="number" id="toneMaxInput" value="{{ last_tone_max }}" step="0.5" min="-100" max="100" placeholder="max" style="width:90px;">
+            <button type="button" class="ghost small" id="tonePresetNeg">Negative only</button>
+            <button type="button" class="ghost small" id="tonePresetClear">Clear</button>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div class="small" style="text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px;">Timespan (within retention)</div>
+          <select id="timespanSel" style="max-width:160px;">
+            <option value="" {% if not last_timespan %}selected{% endif %}>(all available)</option>
+            <option value="1h"  {% if last_timespan=='1h'  %}selected{% endif %}>last 1h</option>
+            <option value="3h"  {% if last_timespan=='3h'  %}selected{% endif %}>last 3h</option>
+            <option value="6h"  {% if last_timespan=='6h'  %}selected{% endif %}>last 6h</option>
+            <option value="12h" {% if last_timespan=='12h' %}selected{% endif %}>last 12h</option>
+            <option value="24h" {% if last_timespan=='24h' %}selected{% endif %}>last 24h</option>
+            <option value="3d"  {% if last_timespan=='3d'  %}selected{% endif %}>last 3 days</option>
+            <option value="7d"  {% if last_timespan=='7d'  %}selected{% endif %}>last 7 days</option>
+          </select>
+        </div>
+      </details>
 
       <button id="searchBtn" style="width:100%;">Search the world</button>
 
@@ -84,16 +149,47 @@
     </div>
 
     <div class="panel subtle">
-      <h3>About this map</h3>
+      <h3>GKG status</h3>
+      <div id="gkgStatus" class="small">
+        <span class="muted">loading…</span>
+      </div>
+      <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap;">
+        <button class="secondary small" id="gkgRefreshBtn">Pull latest</button>
+        <select id="gkgRetentionSel" class="small" style="width:auto;">
+          <option value="3">3h retention</option>
+          <option value="6" selected>6h retention</option>
+          <option value="12">12h retention</option>
+          <option value="24">24h retention</option>
+          <option value="48">48h retention</option>
+        </select>
+      </div>
+      <label class="row" style="margin-top:8px;gap:6px;align-items:center;">
+        <input type="checkbox" id="verifySslChk" checked>
+        <span class="small" style="text-transform:none;letter-spacing:normal;">
+          Verify GDELT SSL cert
+        </span>
+      </label>
+      <div id="sslHint" class="small" style="display:none;margin-top:8px;color:var(--warn);">
+        GDELT's <code>data.gdeltproject.org</code> cert appears invalid
+        (hostname mismatch). Untick the box above to bypass — the data is
+        public and read-only, so the worst case is fabricated location
+        mentions if you're on a hostile network.
+      </div>
+    </div>
+
+    <div class="panel subtle">
+      <h3>How this works</h3>
       <p class="small">
-        Powered by GDELT's Geo API. It scans news in ~100 languages
-        every 15 minutes and tags articles with the specific locations
-        they mention — not just the country of the outlet. Zoom in
-        on a state, city, or town to see hyper-local coverage.
+        Powered by GDELT's Global Knowledge Graph (GKG). Every 15 minutes
+        GDELT publishes a new file of every article it has processed,
+        tagged with the <em>locations mentioned in the article</em> — not
+        just the country of the outlet. We download and parse those files
+        locally so you get true town-level pins, not country centroids.
       </p>
       <p class="small muted" style="margin:0;">
-        Tip: try a keyword like <code>wildfire</code> or <code>protest</code>
-        with timespan = "last week" to see how it lights up regions.
+        First search after startup may take a few seconds while the
+        first file downloads. Searches against already-fetched data
+        are instant.
       </p>
     </div>
   </div>
@@ -135,24 +231,61 @@ const cluster = L.markerClusterGroup({
 
 const status = document.getElementById('searchStatus');
 
-async function runSearch() {
+function selectedThemeGroups() {
+  return Array.from(
+    document.querySelectorAll('#themeGroups .theme-chip input:checked')
+  ).map(b => b.value);
+}
+
+function rawThemesInput() {
+  return (document.getElementById('themesRawInput').value || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function buildSearchParams() {
   const kw = document.getElementById('kwInput').value.trim();
   const topicId = document.getElementById('topicSel').value;
-  const timespan = document.getElementById('timespanSel').value;
-  if (!kw && !topicId) {
-    status.innerHTML = '<span class="danger">Type a keyword or pick a topic first.</span>';
+  const groups = selectedThemeGroups();
+  const themes = rawThemesInput();
+  const tmin = document.getElementById('toneMinInput').value.trim();
+  const tmax = document.getElementById('toneMaxInput').value.trim();
+  const span = document.getElementById('timespanSel').value.trim();
+
+  const q = new URLSearchParams();
+  if (kw) q.set('keyword', kw);
+  if (topicId) q.set('topic_id', topicId);
+  for (const g of groups) q.append('theme_group', g);
+  for (const t of themes) q.append('theme', t);
+  if (tmin) q.set('tone_min', tmin);
+  if (tmax) q.set('tone_max', tmax);
+  if (span) q.set('timespan', span);
+  return { q, kw, topicId, groups, themes, tmin, tmax, span };
+}
+
+function updateFilterSummary() {
+  const p = buildSearchParams();
+  const bits = [];
+  if (p.groups.length) bits.push(`${p.groups.length} group${p.groups.length===1?'':'s'}`);
+  if (p.themes.length) bits.push(`${p.themes.length} raw theme${p.themes.length===1?'':'s'}`);
+  if (p.tmin || p.tmax) bits.push(`tone ${p.tmin||'−∞'}..${p.tmax||'+∞'}`);
+  if (p.span) bits.push(p.span);
+  document.getElementById('filterSummary').textContent =
+    bits.length ? '· ' + bits.join(' · ') : '';
+}
+
+async function runSearch() {
+  const p = buildSearchParams();
+  if (!p.kw && !p.topicId && !p.groups.length && !p.themes.length) {
+    status.innerHTML = '<span class="danger">Type a keyword, pick a topic, or choose a theme filter first.</span>';
     return;
   }
-  status.innerHTML = `Searching <b>${escapeHtml(kw || '(saved topic)')}</b> in ${escapeHtml(timespan)}… (this can take 3-10 seconds)`;
+  const what = p.kw || p.topicId ? (p.kw || '(saved topic)') : '(theme-only)';
+  status.innerHTML = `Searching <b>${escapeHtml(what)}</b> in local GKG…`;
   const btn = document.getElementById('searchBtn');
   btn.disabled = true; btn.textContent = 'Searching…';
 
-  const q = new URLSearchParams({ timespan });
-  if (kw) q.set('keyword', kw);
-  if (topicId) q.set('topic_id', topicId);
-
   try {
-    const r = await fetch('/map/geo?' + q.toString());
+    const r = await fetch('/map/geo?' + p.q.toString());
     const data = await r.json();
     if (!r.ok) {
       status.innerHTML = `<span class="danger">${escapeHtml(data.error || 'Search failed.')}</span>`;
@@ -162,9 +295,9 @@ async function runSearch() {
     cluster.clearLayers();
     if (!features.length) {
       status.innerHTML =
-        `Query: <code>${escapeHtml(data.query)}</code><br>` +
-        `<span class="warn">0 locations found in this timespan.</span> ` +
-        `Try widening the timespan or using a different keyword.`;
+        `<span class="warn">0 locations matched.</span> ` +
+        `GKG holds ${data.gkg_articles} articles right now. ` +
+        `Try loosening filters, a different keyword, or click "Pull latest".`;
       return;
     }
     let total = 0;
@@ -172,38 +305,216 @@ async function runSearch() {
     for (const f of features) {
       if (!f.geometry || !f.geometry.coordinates) continue;
       const [lon, lat] = f.geometry.coordinates;
-      const p = f.properties || {};
-      const count = parseInt(p.count || p.html?.match(/(\d+) article/)?.[1] || 1, 10);
+      const pp = f.properties || {};
+      const count = parseInt(pp.count || 1, 10);
       total += count || 1;
       const marker = L.circleMarker([lat, lon], {
-        radius: Math.min(4 + Math.sqrt(count || 1), 18),
+        radius: Math.min(4 + Math.sqrt(count || 1) * 2, 22),
         color: '#ffb86b',
         fillColor: '#ffb86b',
         weight: 1,
         fillOpacity: 0.55,
       });
-      const articlesHtml = p.html || '<em>(no article list)</em>';
+      const articlesHtml = pp.html || '<em>(no article list)</em>';
       marker.bindPopup(
-        `<h4>${escapeHtml(p.name || 'Unnamed location')}</h4>` +
+        `<h4>${escapeHtml(pp.name || 'Unnamed location')}</h4>` +
         `<div class="small muted" style="margin-bottom:6px;">${count} article${count===1?'':'s'}</div>` +
         articlesHtml,
-        { maxWidth: 360 }
+        { maxWidth: 380 }
       );
       cluster.addLayer(marker);
       bounds.extend([lat, lon]);
     }
     if (bounds.isValid() && features.length > 1) {
-      map.fitBounds(bounds.pad(0.15), { animate: true, maxZoom: 6 });
+      map.fitBounds(bounds.pad(0.15), { animate: true, maxZoom: 7 });
     }
+    const filt = data.filters || {};
+    const filtBits = [];
+    if ((filt.theme_groups || []).length) filtBits.push(`groups: ${filt.theme_groups.join(', ')}`);
+    if ((filt.themes || []).length && !(filt.theme_groups || []).length)
+      filtBits.push(`themes: ${filt.themes.slice(0,4).join(', ')}${filt.themes.length>4?'…':''}`);
+    if (filt.tone_min != null || filt.tone_max != null)
+      filtBits.push(`tone ${filt.tone_min ?? '−∞'}..${filt.tone_max ?? '+∞'}`);
+    if (filt.since_hours) filtBits.push(`last ${filt.since_hours}h`);
     status.innerHTML =
-      `<b>${features.length}</b> locations · ~${total} articles · ` +
-      `query: <code>${escapeHtml(data.query)}</code>`;
+      `<b>${features.length}</b> locations · ${total} mentions · ` +
+      `GKG holds ${data.gkg_articles} articles` +
+      (filtBits.length ? `<br><span class="small muted">filters: ${escapeHtml(filtBits.join(' · '))}</span>` : '');
   } catch (e) {
     status.innerHTML = `<span class="danger">Network error: ${escapeHtml(e.message)}</span>`;
   } finally {
     btn.disabled = false; btn.textContent = 'Search the world';
   }
 }
+
+// --- Theme chip toggling ---------------------------------------
+
+document.querySelectorAll('#themeGroups .theme-chip').forEach(chip => {
+  const input = chip.querySelector('input');
+  // Initialize visual state from any pre-checked inputs (persisted last-pick)
+  if (input.checked) chip.classList.add('on');
+  chip.addEventListener('click', (e) => {
+    // Toggle the hidden checkbox + visual state. Click on the chip,
+    // not just the (hidden) input, so the whole pill is clickable.
+    e.preventDefault();
+    input.checked = !input.checked;
+    chip.classList.toggle('on', input.checked);
+    updateFilterSummary();
+  });
+});
+
+// --- Top-themes panel ------------------------------------------
+
+async function loadTopThemes() {
+  const panel = document.getElementById('topThemesPanel');
+  panel.innerHTML = '<span class="muted">loading…</span>';
+  try {
+    const r = await fetch('/map/themes?top=40');
+    const data = await r.json();
+    const items = data.top_in_db || [];
+    if (!items.length) {
+      panel.innerHTML = '<span class="muted">No themes in GKG yet — pull latest first.</span>';
+      return;
+    }
+    panel.innerHTML = items.map(it =>
+      `<div class="top-theme-row" data-code="${escapeHtml(it.code)}">
+         <code>${escapeHtml(it.code)}</code>
+         <span class="muted">${it.count}</span>
+       </div>`
+    ).join('');
+    panel.querySelectorAll('.top-theme-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const code = row.dataset.code;
+        const input = document.getElementById('themesRawInput');
+        const cur = rawThemesInput();
+        if (cur.includes(code)) return;
+        input.value = (cur.concat([code])).join(', ');
+        updateFilterSummary();
+      });
+    });
+  } catch (e) {
+    panel.innerHTML = `<span class="danger">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+document.getElementById('showTopThemes').addEventListener('click', (e) => {
+  e.preventDefault();
+  const panel = document.getElementById('topThemesPanel');
+  if (panel.style.display === 'none') {
+    panel.style.display = '';
+    loadTopThemes();
+  } else {
+    panel.style.display = 'none';
+  }
+});
+
+// --- Tone presets ----------------------------------------------
+
+document.getElementById('tonePresetNeg').addEventListener('click', () => {
+  document.getElementById('toneMinInput').value = '';
+  document.getElementById('toneMaxInput').value = '0';
+  updateFilterSummary();
+});
+document.getElementById('tonePresetClear').addEventListener('click', () => {
+  document.getElementById('toneMinInput').value = '';
+  document.getElementById('toneMaxInput').value = '';
+  updateFilterSummary();
+});
+
+// Keep the summary fresh as users edit filter inputs.
+for (const id of ['themesRawInput', 'toneMinInput', 'toneMaxInput', 'timespanSel']) {
+  document.getElementById(id).addEventListener('input', updateFilterSummary);
+  document.getElementById(id).addEventListener('change', updateFilterSummary);
+}
+updateFilterSummary();
+
+// --- GKG status panel ------------------------------------------
+
+async function refreshGkgStatus() {
+  try {
+    const r = await fetch('/map/gkg/status');
+    const s = await r.json();
+    const el = document.getElementById('gkgStatus');
+    const ret = document.getElementById('gkgRetentionSel');
+    if (s.retention_hours) ret.value = String(s.retention_hours);
+
+    // Reflect persisted verify-SSL state in the checkbox.
+    const verifyChk = document.getElementById('verifySslChk');
+    if (typeof s.verify_ssl === 'boolean') verifyChk.checked = s.verify_ssl;
+
+    let lines = [];
+    if (s.fetching) {
+      lines.push(`<span class="pill run"><span class="dot"></span>fetching latest…</span>`);
+    } else if (s.articles > 0) {
+      lines.push(`<b>${s.articles}</b> articles · <b>${s.locations}</b> locations cached`);
+    } else {
+      lines.push(`<span class="warn">No data yet.</span> Click "Pull latest" to bootstrap.`);
+    }
+    if (s.last_fetch_at) {
+      lines.push(`<span class="muted">last fetch: ${shortIso(s.last_fetch_at)}</span>`);
+    }
+    if (s.last_error) {
+      lines.push(`<span class="danger">err: ${escapeHtml(s.last_error)}</span>`);
+    }
+    el.innerHTML = lines.join('<br>');
+
+    // Show the SSL-bypass hint only when the latest error looks like a
+    // cert problem. Keep the toggle visible always so the user can
+    // proactively flip it back on once GDELT fixes the cert.
+    const hint = document.getElementById('sslHint');
+    const looksLikeCert = (s.last_error || '').match(
+      /CERTIFICATE_VERIFY|SSL|hostname mismatch|certificate verify failed/i
+    );
+    hint.style.display = looksLikeCert ? '' : 'none';
+  } catch (e) {}
+}
+
+// Persist the SSL-verify toggle when the user flips it.
+document.getElementById('verifySslChk').addEventListener('change', async (e) => {
+  const fd = new FormData();
+  fd.append('verify', e.target.checked ? '1' : '0');
+  try {
+    await fetch('/map/gkg/verify_ssl', { method: 'POST', body: fd });
+  } catch (err) {}
+  // If they just turned off verification *because* of the SSL error,
+  // the natural next step is to try a fresh pull. Give a gentle nudge.
+  if (!e.target.checked) {
+    document.getElementById('gkgStatus').insertAdjacentHTML('beforeend',
+      '<br><span class="small muted">SSL verification disabled. Try "Pull latest" again.</span>');
+  }
+});
+
+document.getElementById('gkgRefreshBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('gkgRefreshBtn');
+  btn.disabled = true; btn.textContent = 'Fetching…';
+  try {
+    await fetch('/map/gkg/refresh', { method: 'POST' });
+  } catch (e) {}
+  // Poll status until it's done
+  const tick = setInterval(async () => {
+    await refreshGkgStatus();
+    const r = await fetch('/map/gkg/status');
+    const s = await r.json();
+    if (!s.fetching) {
+      clearInterval(tick);
+      btn.disabled = false; btn.textContent = 'Pull latest';
+    }
+  }, 1500);
+});
+
+document.getElementById('gkgRetentionSel').addEventListener('change', async (e) => {
+  const fd = new FormData();
+  fd.append('hours', e.target.value);
+  await fetch('/map/gkg/retention', { method: 'POST', body: fd });
+});
+
+function shortIso(s) {
+  if (!s) return '';
+  return s.replace('T', ' ').substring(0, 16) + ' UTC';
+}
+
+refreshGkgStatus();
+setInterval(refreshGkgStatus, 10000);
 
 document.getElementById('searchBtn').addEventListener('click', runSearch);
 document.getElementById('kwInput').addEventListener('keydown', e => {
@@ -222,8 +533,8 @@ function escapeHtml(s) {
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-// Auto-run on first load if there's a remembered query
-{% if last_keyword or last_topic_id %}
+// Auto-run on first load if there's a remembered query (any filter)
+{% if last_keyword or last_topic_id or last_theme_groups or last_themes_raw %}
   setTimeout(runSearch, 250);
 {% endif %}
 </script>

@@ -16,11 +16,14 @@
       <thead>
         <tr>
           <th>Started</th><th>Finished</th><th>Scanned</th>
-          <th>Matched</th><th>New</th><th>Sources</th><th>Error</th>
+          <th>Matched</th><th>New</th><th>Sources</th>
+          <th>Issues</th>
         </tr>
       </thead>
       <tbody>
         {% for r in runs %}
+          {% set src_errors = (r.source_errors_json | from_json) if r.source_errors_json else {} %}
+          {% set warns = (r.warnings_json | from_json) if r.warnings_json else [] %}
           <tr>
             <td class="small nowrap">{{ r.started_at }}</td>
             <td class="small nowrap">{{ r.finished_at or '—' }}</td>
@@ -28,7 +31,36 @@
             <td>{{ r.matched }}</td>
             <td>{{ r.new_docs }}</td>
             <td class="small">{{ r.sources_json or '' }}</td>
-            <td class="small {{ 'danger' if r.error else '' }}">{{ r.error or '' }}</td>
+            <td class="small">
+              {% if r.error %}
+                <div class="danger" style="margin-bottom:6px;">{{ r.error }}</div>
+              {% endif %}
+              {% if warns %}
+                {% for w in warns %}
+                  <div class="muted" style="margin-bottom:4px;">⚠ {{ w }}</div>
+                {% endfor %}
+              {% endif %}
+              {% if src_errors %}
+                <details>
+                  <summary class="danger">
+                    {% set total = src_errors.values() | map('length') | sum %}
+                    {{ total }} source error{{ '' if total == 1 else 's' }}
+                    ({{ src_errors.keys() | join(', ') }})
+                  </summary>
+                  <div style="margin-top:6px;">
+                    {% for src, msgs in src_errors.items() %}
+                      <div style="margin-bottom:4px;"><b>{{ src }}</b></div>
+                      {% for m in msgs %}
+                        <div class="muted" style="margin:2px 0 2px 12px; font-family:monospace;">{{ m }}</div>
+                      {% endfor %}
+                    {% endfor %}
+                  </div>
+                </details>
+              {% endif %}
+              {% if not r.error and not warns and not src_errors %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
           </tr>
         {% endfor %}
       </tbody>

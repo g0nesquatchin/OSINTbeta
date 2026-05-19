@@ -6,11 +6,15 @@ Free, no key. Format:
 
 from __future__ import annotations
 
+import logging
 from typing import Iterable
 from urllib.parse import quote_plus
 
 from ..storage import Document
 from .base import parse_dt
+
+
+log = logging.getLogger(__name__)
 
 
 def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
@@ -49,7 +53,7 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
             try:
                 parsed = feedparser.parse(url)
             except Exception as e:  # pragma: no cover
-                print(f"[google_news] {kw!r} ({gl}) failed: {e}")
+                log.warning("%r (%s) failed: %s", kw, gl, e)
                 continue
             for entry in parsed.entries:
                 link = entry.get("link") or ""

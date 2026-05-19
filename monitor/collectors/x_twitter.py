@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Iterable
 
 from ..storage import Document
 from .base import parse_dt
 
 
+log = logging.getLogger(__name__)
+
+
 def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
     bearer = source_config.get("bearer_token") or ""
     if not bearer:
-        print("[x_twitter] missing bearer_token, skipping")
+        log.warning("missing bearer_token, skipping")
         return
     try:
         import tweepy
@@ -35,7 +39,7 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
                 user_fields=["username"],
             )
         except Exception as e:  # pragma: no cover
-            print(f"[x_twitter] {q!r} failed: {e}")
+            log.warning("%r failed: %s", q, e)
             continue
         users = {}
         if resp.includes and "users" in resp.includes:

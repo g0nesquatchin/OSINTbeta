@@ -27,6 +27,9 @@ from spiderfoot_client import (
 )
 from spiderfoot_manager import manager, setup_instructions
 
+from gkg.storage import GkgStore
+from gkg.themes import THEME_GROUPS, codes_for_groups
+from gkg.worker import GkgWorker
 from monitor import SOURCE_NAMES as MONITOR_SOURCES
 from monitor.countries import COUNTRIES, by_region
 from monitor.geo_api import GeoApiError, build_query as geo_build_query, fetch_geo
@@ -50,6 +53,12 @@ monitor_store.bootstrap_defaults()
 monitor_runner = MonitorRunner(monitor_store)
 monitor_scheduler = Scheduler(monitor_store, monitor_runner)
 
+GKG_DB = os.environ.get(
+    "GKG_DB", os.path.join(APP_ROOT, "gkg.db")
+)
+gkg_store = GkgStore(GKG_DB)
+gkg_worker = GkgWorker(gkg_store, fetch_interval_min=15)
+
 
 MONITOR_SOURCE_LABELS = {
     "gdelt": "GDELT (global news)",
@@ -58,6 +67,7 @@ MONITOR_SOURCE_LABELS = {
     "reddit": "Reddit",
     "bluesky": "Bluesky",
     "mastodon": "Mastodon",
+    "telegram": "Telegram (public channels)",
     "x_twitter": "X / Twitter",
 }
 
@@ -392,7 +402,14 @@ def monitor_topic_new():
             flash(f"Topic {name!r} already exists.", "error")
             return redirect(url_for("monitor_topic_new"))
         tid = monitor_store.create_topic(name, mode, keywords)
-        flash(f"Topic {name!r} created.", "ok")
+        if not keywords:
+            flash(
+                f"Topic {name!r} created, but has no keywords yet — it won't "
+                "match anything until you add some.",
+                "warn",
+            )
+        else:
+            flash(f"Topic {name!r} created.", "ok")
         return redirect(url_for("monitor_topic_edit", topic_id=tid))
     return render_template("monitor_topic_edit.html", topic=None)
 
@@ -410,7 +427,14 @@ def monitor_topic_edit(topic_id: int):
             if ln.strip()
         ]
         monitor_store.update_topic(topic_id, name, mode, keywords)
-        flash(f"Topic {name!r} saved.", "ok")
+        if not keywords:
+            flash(
+                f"Topic {name!r} saved, but has no keywords — it won't match "
+                "anything until you add some.",
+                "warn",
+            )
+        else:
+            flash(f"Topic {name!r} saved.", "ok")
         return redirect(url_for("monitor_topic_edit", topic_id=topic_id))
     return render_template("monitor_topic_edit.html", topic=topic)
 
@@ -487,6 +511,16 @@ def monitor_source_save(name: str):
             cfg["limit_per_hashtag"] = int(request.form.get("limit_per_hashtag", "40"))
         except ValueError:
             cfg["limit_per_hashtag"] = 40
+    elif name == "telegram":
+        cfg["channels"] = _lines("channels")
+        try:
+            cfg["limit_per_channel"] = int(request.form.get("limit_per_channel", "40"))
+        except ValueError:
+            cfg["limit_per_channel"] = 40
+        try:
+            cfg["request_delay_s"] = float(request.form.get("request_delay_s", "1.5"))
+        except ValueError:
+            cfg["request_delay_s"] = 1.5
     elif name == "x_twitter":
         cfg["bearer_token"] = (request.form.get("bearer_token") or "").strip()
         cfg["search_queries"] = _lines("search_queries")
@@ -585,6 +619,8 @@ def _source_statuses() -> list[dict]:
             configured, hint = False, "no feed URLs configured"
         elif name == "mastodon" and not cfg.get("instance_url"):
             configured, hint = False, "no Mastodon instance set"
+        elif name == "telegram" and not cfg.get("channels"):
+            configured, hint = False, "no Telegram channels listed"
         out.append({
             "name": name,
             "label": MONITOR_SOURCE_LABELS.get(name, name),
@@ -606,7 +642,16 @@ def world_map():
         topics=monitor_store.list_topics(),
         last_keyword=monitor_store.get_setting("map_last_keyword", ""),
         last_topic_id=_safe_int(monitor_store.get_setting("map_last_topic", "")),
-        last_timespan=monitor_store.get_setting("map_last_timespan", "7d"),
+        last_timespan=monitor_store.get_setting("map_last_timespan", "6h"),
+        last_theme_groups=[
+            x for x in
+            monitor_store.get_setting("map_last_theme_groups", "").split(",")
+            if x
+        ],
+        last_themes_raw=monitor_store.get_setting("map_last_themes_raw", ""),
+        last_tone_min=monitor_store.get_setting("map_last_tone_min", ""),
+        last_tone_max=monitor_store.get_setting("map_last_tone_max", ""),
+        theme_groups=THEME_GROUPS,
     )
 
 
@@ -617,12 +662,58 @@ def _safe_int(s: str) -> int | None:
         return None
 
 
+def _safe_float(s: str) -> float | None:
+    try:
+        return float(s) if s not in (None, "") else None
+    except ValueError:
+        return None
+
+
+# Map a small set of human timespan labels onto hours, used by the map
+# filter. Anything beyond the GKG retention window will return zero
+# results anyway — the dropdown options stay within that window.
+TIMESPAN_TO_HOURS = {
+    "1h": 1, "3h": 3, "6h": 6, "12h": 12, "24h": 24,
+    "3d": 72, "7d": 168,
+}
+
+
+@app.route("/map/themes")
+def world_map_themes():
+    """Return the curated theme catalog plus the top-N most common
+    themes currently in the GKG DB. Used by the filter UI."""
+    try:
+        n = max(1, min(int(request.args.get("top", 30)), 200))
+    except ValueError:
+        n = 30
+    return jsonify({
+        "groups": [
+            {"id": g.id, "label": g.label,
+             "codes": g.codes, "description": g.description}
+            for g in THEME_GROUPS
+        ],
+        "top_in_db": [
+            {"code": code, "count": count}
+            for code, count in gkg_store.top_themes(limit=n)
+        ],
+    })
+
+
 @app.route("/map/geo")
 def world_map_geo():
-    """Live GeoJSON of locations mentioning a keyword/topic."""
+    """GeoJSON of locations mentioned in GKG articles matching the filters.
+
+    Accepts:
+      keyword      free-text term ORed into the keyword search
+      topic_id     a Monitor topic whose keywords are ORed into the search
+      theme_group  (repeatable) curated theme group id; OR'd
+      theme        (repeatable) raw GDELT theme code; OR'd alongside groups
+      tone_min,
+      tone_max     float bounds on the article's average tone (-10..+10)
+      timespan     '1h' / '6h' / '24h' / '7d' / ... — recency filter
+    """
     keyword = (request.args.get("keyword") or "").strip()
     topic_id = request.args.get("topic_id", type=int)
-    timespan = (request.args.get("timespan") or "7d").strip()
 
     keywords: list[str] = []
     chosen_topic_name = ""
@@ -634,33 +725,167 @@ def world_map_geo():
     if keyword:
         keywords.append(keyword)
 
-    if not keywords:
+    # Themes — curated groups + raw codes both OR'd together.
+    group_ids = [g for g in request.args.getlist("theme_group") if g]
+    raw_themes = [t.strip() for t in request.args.getlist("theme") if t.strip()]
+    # Free-text theme input can also be a comma-separated list in a single param
+    if not raw_themes:
+        for blob in request.args.getlist("themes_raw"):
+            for t in blob.split(","):
+                t = t.strip()
+                if t:
+                    raw_themes.append(t)
+    themes = codes_for_groups(group_ids) + raw_themes
+    # De-dupe while preserving order.
+    seen: set[str] = set()
+    themes = [c for c in themes if not (c in seen or seen.add(c))]
+
+    # Tone bounds.
+    tone_min = _safe_float(request.args.get("tone_min"))
+    tone_max = _safe_float(request.args.get("tone_max"))
+
+    # Timespan → since_hours. Default is no time filter (within the
+    # retention window the worker already enforces).
+    timespan = (request.args.get("timespan") or "").strip()
+    since_hours = TIMESPAN_TO_HOURS.get(timespan)
+
+    if not keywords and not themes:
         return jsonify({
-            "error": "Pick a topic or type a keyword to search.",
-            "query": "",
+            "error": "Pick a topic, type a keyword, or choose a theme filter.",
         }), 400
 
-    # Persist for next visit
+    # Persist last selection. Treat themes as zero-keyword case too.
     monitor_store.set_setting("map_last_keyword", keyword)
     monitor_store.set_setting("map_last_topic", str(topic_id) if topic_id else "")
     monitor_store.set_setting("map_last_timespan", timespan)
+    monitor_store.set_setting("map_last_theme_groups", ",".join(group_ids))
+    monitor_store.set_setting("map_last_themes_raw", ",".join(raw_themes))
+    monitor_store.set_setting(
+        "map_last_tone_min", "" if tone_min is None else str(tone_min)
+    )
+    monitor_store.set_setting(
+        "map_last_tone_max", "" if tone_max is None else str(tone_max)
+    )
 
-    query = geo_build_query(keywords)
-    try:
-        geojson = fetch_geo(query, timespan=timespan, maxpoints=500)
-    except GeoApiError as e:
-        return jsonify({"error": str(e), "query": query}), 502
+    results = gkg_store.search(
+        keywords,
+        limit=5000,
+        themes=themes or None,
+        tone_min=tone_min,
+        tone_max=tone_max,
+        since_hours=since_hours,
+    )
+    features = []
+    for r in results:
+        # Build a small popup HTML from the article URLs
+        articles_html = "".join(
+            f'<a href="{u}" target="_blank" rel="noopener">{_short_url(u)}</a><br>'
+            for u in r.article_urls
+        )
+        type_label = {
+            1: "Country", 2: "US State", 3: "US City",
+            4: "World City", 5: "World State",
+        }.get(r.loc_type, "Place")
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [r.lon, r.lat]},
+            "properties": {
+                "name": r.name,
+                "type": type_label,
+                "country_code": r.country_code,
+                "admin1_code": r.admin1_code,
+                "count": r.count,
+                "html": (
+                    f'<div class="small muted" style="margin-bottom:6px;">'
+                    f'{type_label}'
+                    f'{" · " + r.country_code if r.country_code else ""}'
+                    f'</div>{articles_html or "(no article URLs)"}'
+                ),
+            },
+        })
 
-    features = geojson.get("features") or []
+    stats = gkg_store.stats()
     return jsonify({
         "type": "FeatureCollection",
         "features": features,
-        "query": query,
-        "timespan": timespan,
         "topic_name": chosen_topic_name,
         "keyword": keyword,
         "count": len(features),
+        "gkg_articles": stats["articles"],
+        "gkg_locations": stats["locations"],
+        "gkg_window": {"earliest": stats["earliest"], "latest": stats["latest"]},
+        "filters": {
+            "theme_groups": group_ids,
+            "themes": themes,
+            "tone_min": tone_min,
+            "tone_max": tone_max,
+            "timespan": timespan,
+            "since_hours": since_hours,
+        },
     })
+
+
+def _short_url(url: str) -> str:
+    """Compact a long URL for popup display."""
+    from urllib.parse import urlparse
+    try:
+        p = urlparse(url)
+        host = p.hostname or url
+        path = (p.path or "")
+        if len(path) > 50:
+            path = path[:47] + "…"
+        return host + path
+    except Exception:
+        return url[:60]
+
+
+@app.route("/map/gkg/status")
+def map_gkg_status():
+    stats = gkg_store.stats()
+    return jsonify({
+        **gkg_worker.status.to_dict(),
+        "retention_hours": gkg_worker.retention_hours(),
+        "verify_ssl": gkg_worker.verify_ssl(),
+        "articles": stats["articles"],
+        "locations": stats["locations"],
+        "earliest": stats["earliest"],
+        "latest": stats["latest"],
+    })
+
+
+@app.route("/map/gkg/refresh", methods=["POST"])
+def map_gkg_refresh():
+    if gkg_worker.status.fetching:
+        return jsonify({"ok": False, "error": "Already fetching."}), 409
+    # Run in a thread so the request doesn't block the browser
+    import threading
+    threading.Thread(target=gkg_worker.fetch_now, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route("/map/gkg/retention", methods=["POST"])
+def map_gkg_retention():
+    try:
+        hours = int(request.form.get("hours", "6"))
+    except ValueError:
+        hours = 6
+    gkg_worker.set_retention(hours)
+    return jsonify({"ok": True, "retention_hours": gkg_worker.retention_hours()})
+
+
+@app.route("/map/gkg/verify_ssl", methods=["POST"])
+def map_gkg_verify_ssl():
+    """Toggle whether the GKG fetcher verifies GDELT's SSL cert.
+
+    Useful when ``data.gdeltproject.org`` is serving a cert with a
+    hostname mismatch (a recurring issue with that host). The data is
+    public and read-only, so the toggle is offered to the user with a
+    clear inline caveat in the UI.
+    """
+    raw = (request.form.get("verify") or "").strip().lower()
+    value = raw in ("1", "true", "on", "yes")
+    gkg_worker.set_verify_ssl(value)
+    return jsonify({"ok": True, "verify_ssl": gkg_worker.verify_ssl()})
 
 
 # --- historical-data routes kept for backward compat -------------
@@ -736,6 +961,18 @@ def short(text, n=140):
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
+@app.template_filter("from_json")
+def from_json(value):
+    """Decode a JSON string from a DB row. Returns None on empty/invalid."""
+    if not value:
+        return None
+    try:
+        import json as _json
+        return _json.loads(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @app.template_filter("ts")
 def ts(value):
     """Format a SpiderFoot timestamp (string-of-unix or 0)."""
@@ -763,6 +1000,8 @@ if __name__ == "__main__":
         manager.ensure_started()
     # Start the Monitor scheduler in the background (idle unless enabled)
     monitor_scheduler.start()
+    # Start the GKG worker — fetches a fresh file every 15 minutes
+    gkg_worker.start()
     host = os.environ.get("OSINT_HOST", "127.0.0.1")
     port = int(os.environ.get("OSINT_PORT", "5000"))
     print(f"OSINT app:        http://{host}:{port}")

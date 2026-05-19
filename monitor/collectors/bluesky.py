@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Iterable
 
@@ -9,6 +10,9 @@ import requests
 
 from ..storage import Document
 from .base import parse_dt
+
+
+log = logging.getLogger(__name__)
 
 
 SEARCH_URL = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts"
@@ -27,7 +31,7 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
             r.raise_for_status()
             posts = r.json().get("posts", [])
         except Exception as e:  # pragma: no cover
-            print(f"[bluesky] {term!r} failed: {e}")
+            log.warning("%r failed: %s", term, e)
             posts = []
         for p in posts:
             record = p.get("record", {}) or {}

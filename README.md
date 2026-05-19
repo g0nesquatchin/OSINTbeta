@@ -91,6 +91,7 @@ coverage emerges.
 | Reddit         | Free API key        | reddit.com/prefs/apps                        |
 | Bluesky        | None                | Public search endpoint                       |
 | Mastodon       | Optional            | Public hashtag timeline                      |
+| Telegram       | None                | Public channels via `t.me/s/<name>` HTML preview. Fragile (scraped), polite-throttled. Local keyword match. |
 | X / Twitter    | Paid API ($200/mo)  | v2 Basic tier required                       |
 
 **Not supported:** Facebook and Instagram. Meta removed public

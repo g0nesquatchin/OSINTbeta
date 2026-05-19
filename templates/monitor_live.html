@@ -162,10 +162,10 @@ async function pollOnce() {
       document.getElementById('startBtn').disabled = false;
       document.getElementById('startBtn').textContent = 'Pull now';
       polling = false;
-      if (s.error) {
-        document.getElementById('stream').insertAdjacentHTML('afterbegin',
-          `<div class="flash error">Run finished with error: ${escapeHtml(s.error)}</div>`);
-      } else if ((s.recent||[]).length === 0) {
+      renderRunDiagnostics(s);
+      if (!s.error && (s.recent||[]).length === 0 &&
+          !(s.warnings||[]).length &&
+          Object.keys(s.source_errors||{}).length === 0) {
         document.getElementById('stream').innerHTML =
           `<div class="empty"><p>Run finished but no matches were produced.<br>
            <span class="small">Common causes: topic keywords don't match any current articles in those regions,
@@ -243,6 +243,37 @@ function escapeHtml(s) {
   return String(s || '')
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function renderRunDiagnostics(s) {
+  // Surface warnings + per-source errors that came back with the run.
+  // Inserted ahead of any match items so they're impossible to miss.
+  const root = document.getElementById('stream');
+  if (!root) return;
+  const blocks = [];
+  if (s.error) {
+    blocks.push(
+      `<div class="flash error">Run finished with error: ${escapeHtml(s.error)}</div>`
+    );
+  }
+  for (const w of (s.warnings || [])) {
+    blocks.push(`<div class="flash warn">⚠ ${escapeHtml(w)}</div>`);
+  }
+  const srcErrs = s.source_errors || {};
+  for (const [src, msgs] of Object.entries(srcErrs)) {
+    const lines = (msgs || []).map(m =>
+      `<div class="small muted" style="font-family:ui-monospace,monospace;margin-left:8px;">${escapeHtml(m)}</div>`
+    ).join('');
+    blocks.push(
+      `<div class="flash error">
+        <div><b>${escapeHtml(src)}</b> · ${msgs.length} error${msgs.length === 1 ? '' : 's'}</div>
+        ${lines}
+      </div>`
+    );
+  }
+  if (blocks.length) {
+    root.insertAdjacentHTML('afterbegin', blocks.join(''));
+  }
 }
 
 // ---- country search + selection ------------------------------

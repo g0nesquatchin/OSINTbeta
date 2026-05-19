@@ -169,6 +169,34 @@
   <div style="margin-top:12px;"><button type="submit">Save Mastodon</button></div>
 </form>
 
+{% set s = sources['telegram'] %}
+<form method="post" action="{{ url_for('monitor_source_save', name='telegram') }}" id="src-telegram" class="panel">
+  <div class="row between" style="margin-bottom:8px;">
+    <h2 style="margin:0;">Telegram (public channels)</h2>
+    {% if s.enabled %}<span class="pill on">on</span>{% else %}<span class="pill off">off</span>{% endif %}
+  </div>
+  <p class="small muted">
+    Pulls the last ~20–40 messages from each public channel via the
+    <code>t.me/s/&lt;channel&gt;</code> web preview. No API key. List one channel handle per line — with or without the leading <code>@</code>. Private/invite-only channels can't be reached this way. Topic keywords aren't sent to Telegram; instead the runner matches them locally against each pulled message body, so anything you add as a topic keyword will tag matching messages from these channels.
+  </p>
+  <p class="small muted">
+    <b>Caveat:</b> this is HTML scraping, so a Telegram redesign can break it. The parser uses forgiving selectors and logs errors per-channel — runs continue if one channel breaks. Keep the request delay above 1s to stay polite.
+  </p>
+  <label class="row" style="margin-bottom:14px;">
+    <input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}>
+    <span class="small" style="margin-left:6px;text-transform:none;letter-spacing:normal;font-size:13px;">Enabled</span>
+  </label>
+  <div class="field">
+    <label>Channels (one per line, e.g. <code>durov</code> or <code>@durov</code>)</label>
+    <textarea name="channels" rows="6" placeholder="durov&#10;telegram&#10;TheInsiderEng">{{ (s.config.get('channels') or []) | join('\n') }}</textarea>
+  </div>
+  <div class="field-row cols-2">
+    <div class="field"><label>Messages per channel</label><input type="number" name="limit_per_channel" value="{{ s.config.get('limit_per_channel', 40) }}" min="1" max="100"></div>
+    <div class="field"><label>Delay between channels (s)</label><input type="number" step="0.1" name="request_delay_s" value="{{ s.config.get('request_delay_s', 1.5) }}" min="0.5"></div>
+  </div>
+  <div style="margin-top:12px;"><button type="submit">Save Telegram</button></div>
+</form>
+
 {% set s = sources['x_twitter'] %}
 <form method="post" action="{{ url_for('monitor_source_save', name='x_twitter') }}" id="src-x_twitter" class="panel">
   <div class="row between" style="margin-bottom:8px;">

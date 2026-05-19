@@ -39,6 +39,19 @@
       <div class="small">{{ last_run.finished_at or last_run.started_at }}</div>
       <div class="small muted">scanned {{ last_run.scanned }} · matched {{ last_run.matched }} · new {{ last_run.new_docs }}</div>
       {% if last_run.error %}<div class="small danger">err: {{ last_run.error }}</div>{% endif %}
+      {% set last_warns = (last_run.warnings_json | from_json) or [] %}
+      {% set last_src_errors = (last_run.source_errors_json | from_json) or {} %}
+      {% if last_warns %}
+        {% for w in last_warns %}
+          <div class="small" style="color: var(--warn);">⚠ {{ w | truncate(120, end='…') }}</div>
+        {% endfor %}
+      {% endif %}
+      {% if last_src_errors %}
+        <div class="small danger" style="margin-top:4px;">
+          source errors: {{ last_src_errors.keys() | join(', ') }}
+          · <a href="{{ url_for('monitor_runs') }}">details</a>
+        </div>
+      {% endif %}
     {% else %}<div class="muted small">No runs yet.</div>{% endif %}
   </div>
 </div>
