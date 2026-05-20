@@ -25,8 +25,8 @@
           {% set src_errors = (r.source_errors_json | from_json) if r.source_errors_json else {} %}
           {% set warns = (r.warnings_json | from_json) if r.warnings_json else [] %}
           <tr>
-            <td class="small nowrap">{{ r.started_at }}</td>
-            <td class="small nowrap">{{ r.finished_at or '—' }}</td>
+            <td class="small nowrap">{{ r.started_at | to_est }}</td>
+            <td class="small nowrap">{{ (r.finished_at | to_est) if r.finished_at else '—' }}</td>
             <td>{{ r.scanned }}</td>
             <td>{{ r.matched }}</td>
             <td>{{ r.new_docs }}</td>

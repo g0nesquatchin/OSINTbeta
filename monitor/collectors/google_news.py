@@ -11,7 +11,7 @@ from typing import Iterable
 from urllib.parse import quote_plus
 
 from ..storage import Document
-from .base import parse_dt
+from .base import extract_date_from_url, parse_dt
 
 
 log = logging.getLogger(__name__)
@@ -64,6 +64,17 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
                     author = src.get("title", "Google News")
                 else:
                     author = src or "Google News"
+                # Prefer a date embedded in the article URL — Google News
+                # frequently surfaces older articles whose RSS pubdate
+                # reflects the feed update, not the original article.
+                url_date = extract_date_from_url(link)
+                feed_date = parse_dt(entry.get("published") or entry.get("updated"))
+                if url_date is not None:
+                    created_at = url_date
+                    date_source = "url"
+                else:
+                    created_at = feed_date
+                    date_source = "feed_pubdate"
                 yield Document(
                     source="google_news",
                     source_id=link,
@@ -71,12 +82,13 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
                     title=entry.get("title", "") or "",
                     content=entry.get("summary", "") or "",
                     url=link,
-                    created_at=parse_dt(entry.get("published") or entry.get("updated")),
+                    created_at=created_at,
                     extra={
                         "keyword": kw,
                         "country": gl,
                         "lang": hl,
                         # surface as sourcecountry too so the map picks it up
                         "sourcecountry": gl,
+                        "date_source": date_source,
                     },
                 )

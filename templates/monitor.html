@@ -7,6 +7,7 @@
   <div class="row">
     <a class="btn ghost" href="{{ url_for('monitor_topics') }}">Topics</a>
     <a class="btn ghost" href="{{ url_for('monitor_sources_page') }}">Sources</a>
+    <a class="btn ghost" href="{{ url_for('monitor_filters') }}">Filters</a>
     <a class="btn ghost" href="{{ url_for('monitor_runs') }}">Runs</a>
   </div>
 </div>
@@ -36,7 +37,7 @@
   <div class="panel">
     <h3>Last run</h3>
     {% if last_run %}
-      <div class="small">{{ last_run.finished_at or last_run.started_at }}</div>
+      <div class="small">{{ (last_run.finished_at or last_run.started_at) | to_est }}</div>
       <div class="small muted">scanned {{ last_run.scanned }} · matched {{ last_run.matched }} · new {{ last_run.new_docs }}</div>
       {% if last_run.error %}<div class="small danger">err: {{ last_run.error }}</div>{% endif %}
       {% set last_warns = (last_run.warnings_json | from_json) or [] %}
@@ -104,7 +105,7 @@
 </div>
 
 <div class="panel">
-  <form method="get" action="{{ url_for('monitor') }}" class="row" style="gap:10px;align-items:end;">
+  <form method="get" action="{{ url_for('monitor') }}" class="row" style="gap:10px;align-items:end;flex-wrap:wrap;">
     <div style="flex:2;min-width:240px;">
       <label>Search text</label>
       <input type="text" name="q" value="{{ q }}" placeholder="keyword, phrase…">
@@ -128,7 +129,15 @@
       </select>
     </div>
     <div>
-      <label>Since</label>
+      <label>Show articles from</label>
+      <select name="window" id="windowSel" onchange="document.getElementById('customDateWrap').style.display = (this.value === 'custom') ? '' : 'none';">
+        {% for key, label, _hrs in window_options %}
+          <option value="{{ key }}" {% if window == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div id="customDateWrap" style="{% if window != 'custom' %}display:none;{% endif %}">
+      <label>Custom date (since)</label>
       <input type="date" name="since" value="{{ since }}">
     </div>
     <div>
@@ -137,6 +146,26 @@
     </div>
     <button type="submit">Filter</button>
   </form>
+  <div class="small muted" style="margin-top:8px;">
+    Currently showing matches from <b>{{ window_label }}</b>.
+    {% if window != 'all' %}
+      <a href="{{ url_for('monitor', q=q, topic_id=topic_id, source=source, window='all', limit=limit) }}">Show all time →</a>
+    {% endif %}
+    {% if blocklist_size or min_title_length %}
+      <span style="margin-left:8px;">·</span>
+      {% if bypass_filters %}
+        Display filters bypassed
+        ({% if blocklist_size %}{{ blocklist_size }} blocked domains{% endif %}{% if blocklist_size and min_title_length %}, {% endif %}{% if min_title_length %}min title {{ min_title_length }}{% endif %}).
+        <a href="{{ url_for('monitor', q=q, topic_id=topic_id, source=source, window=window, since=since, limit=limit) }}">Re-apply →</a>
+      {% else %}
+        Display filters on
+        ({% if blocklist_size %}{{ blocklist_size }} blocked domains{% endif %}{% if blocklist_size and min_title_length %}, {% endif %}{% if min_title_length %}min title {{ min_title_length }}{% endif %}).
+        <a href="{{ url_for('monitor', q=q, topic_id=topic_id, source=source, window=window, since=since, limit=limit, bypass_filters=1) }}">Show filtered →</a>
+        ·
+        <a href="{{ url_for('monitor_filters') }}">Edit →</a>
+      {% endif %}
+    {% endif %}
+  </div>
 </div>
 
 <div class="panel" style="padding:0;">
@@ -148,14 +177,29 @@
       <tbody>
         {% for r in rows %}
           <tr>
-            <td><span class="tag">{{ r.source }}</span></td>
+            <td>
+              {% for s in (r.sources or [r.source]) %}
+                <span class="tag" style="margin-right:2px;">{{ s }}</span>
+              {% endfor %}
+              {% if r.source_count and r.source_count > 1 %}
+                <span class="small muted" title="Same article surfaced across {{ r.source_count }} sources; collapsed.">×{{ r.source_count }}</span>
+              {% endif %}
+            </td>
             <td class="small">{{ r.author }}</td>
             <td>
               <div>{{ (r.title or r.content) | short(200) }}</div>
               {% if r.url %}<div class="small muted">{{ r.url[:80] }}</div>{% endif %}
             </td>
             <td class="small">{{ r.topics or '' }}</td>
-            <td class="small">{{ r.created_at or r.collected_at or '' }}</td>
+            <td class="small nowrap">
+              {% if r.created_at %}
+                {{ r.created_at | to_est }}
+              {% else %}
+                <span class="muted" title="Article has no published date; falling back to when we collected it.">
+                  collected {{ r.collected_at | to_est }}
+                </span>
+              {% endif %}
+            </td>
             <td>{% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">open ↗</a>{% endif %}</td>
           </tr>
         {% endfor %}

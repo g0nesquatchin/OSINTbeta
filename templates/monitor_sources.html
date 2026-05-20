@@ -134,13 +134,25 @@
     <h2 style="margin:0;">Bluesky</h2>
     {% if s.enabled %}<span class="pill on">on</span>{% else %}<span class="pill off">off</span>{% endif %}
   </div>
-  <p class="small muted">Public search endpoint — no credentials. Searches use your topic keywords directly.</p>
+  <p class="small muted">
+    Public search endpoint — no credentials needed for light use, but Bluesky
+    aggressively 403s unauthenticated traffic under any load.
+    For sustained pulls, paste an App-Password access token below; we'll send
+    it as a Bearer header. (Settings → Privacy &amp; Security → App Passwords
+    in the Bluesky web client; then POST to <code>com.atproto.server.createSession</code>
+    with handle + app password to get the <code>accessJwt</code>.) If 403s
+    pile up mid-run we bail out gracefully and surface that in the runs UI.
+  </p>
   <label class="row" style="margin-bottom:14px;">
     <input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}>
     <span class="small" style="margin-left:6px;text-transform:none;letter-spacing:normal;font-size:13px;">Enabled</span>
   </label>
   <div class="field-row cols-2">
     <div class="field"><label>Limit per term</label><input type="number" name="limit_per_term" value="{{ s.config.get('limit_per_term', 50) }}"></div>
+    <div class="field">
+      <label>Access JWT (optional)</label>
+      <input type="password" name="access_jwt" value="{{ s.config.get('access_jwt', '') }}" placeholder="eyJhbGc…">
+    </div>
   </div>
   <div style="margin-top:12px;"><button type="submit">Save Bluesky</button></div>
 </form>

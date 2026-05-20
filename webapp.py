@@ -330,18 +330,69 @@ def resources():
 # --- routes: monitor ----------------------------------------------
 
 
+# Time-window quick-pick options for the /monitor filter. The map from
+# window key to (label, hours-back-from-now or None).
+MONITOR_WINDOWS = [
+    ("24h",    "Last 24 hours",   24),
+    ("7d",     "Last 7 days",     24 * 7),
+    ("30d",    "Last 30 days",    24 * 30),
+    ("90d",    "Last 90 days",    24 * 90),
+    ("custom", "Custom date…",    None),
+    ("all",    "All time",        None),
+]
+DEFAULT_WINDOW = "7d"
+
+
+def _resolve_window(window: str, custom_since: str | None) -> tuple[str, str | None, str]:
+    """Return (effective_window_key, iso_cutoff_or_None, human_label).
+
+    The cutoff is an ISO 8601 string at UTC, suitable for direct use in
+    search_matches(since=…). When the window is 'all', cutoff is None
+    (no time filter applied). When 'custom', the user-supplied date
+    becomes the cutoff after light validation.
+    """
+    from datetime import datetime, timedelta, timezone
+    if window not in {k for k, _, _ in MONITOR_WINDOWS}:
+        window = DEFAULT_WINDOW
+    if window == "all":
+        return window, None, "all time"
+    if window == "custom":
+        if not custom_since:
+            # Fall back to default if the user picked custom but didn't
+            # actually supply a date.
+            return DEFAULT_WINDOW, _hours_ago(24 * 7), "last 7 days"
+        # Treat user input as a calendar date in their local intent;
+        # the SQL comparison is lexicographic on ISO strings, so this
+        # works without TZ math.
+        return window, custom_since, f"since {custom_since}"
+    # 24h / 7d / 30d / 90d
+    hours = next(h for k, _, h in MONITOR_WINDOWS if k == window)
+    label = next(lbl.lower() for k, lbl, _ in MONITOR_WINDOWS if k == window)
+    return window, _hours_ago(hours), label
+
+
+def _hours_ago(hours: int) -> str:
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+
 @app.route("/monitor")
 def monitor():
     q = request.args.get("q") or None
     topic_id = request.args.get("topic_id", type=int)
     source = request.args.get("source") or None
-    since = request.args.get("since") or None
+    window_raw = (request.args.get("window") or DEFAULT_WINDOW).strip()
+    custom_since = (request.args.get("since") or "").strip() or None
+    window, cutoff_iso, window_label = _resolve_window(window_raw, custom_since)
+    bypass_filters = request.args.get("bypass_filters") == "1"
     try:
         limit = max(1, min(int(request.args.get("limit", 100)), 1000))
     except ValueError:
         limit = 100
     rows = monitor_store.search_matches(
-        query=q, topic_id=topic_id, source=source, since=since, limit=limit,
+        query=q, topic_id=topic_id, source=source,
+        since=cutoff_iso, limit=limit,
+        bypass_filters=bypass_filters,
     )
     return render_template(
         "monitor.html",
@@ -349,7 +400,10 @@ def monitor():
         q=q or "",
         topic_id=topic_id or "",
         source=source or "",
-        since=since or "",
+        window=window,
+        window_options=MONITOR_WINDOWS,
+        window_label=window_label,
+        since=custom_since or "",
         limit=limit,
         topics=monitor_store.list_topics(),
         all_sources=MONITOR_SOURCES,
@@ -360,6 +414,9 @@ def monitor():
         scheduler_enabled=monitor_scheduler.enabled(),
         scheduler_interval=monitor_scheduler.interval_min(),
         scheduler_next=monitor_scheduler.next_trigger(),
+        bypass_filters=bypass_filters,
+        blocklist_size=len(monitor_store.get_blocklist()),
+        min_title_length=monitor_store.get_min_title_length(),
     )
 
 
@@ -503,6 +560,7 @@ def monitor_source_save(name: str):
             cfg["limit_per_term"] = int(request.form.get("limit_per_term", "50"))
         except ValueError:
             cfg["limit_per_term"] = 50
+        cfg["access_jwt"] = (request.form.get("access_jwt") or "").strip()
     elif name == "mastodon":
         cfg["instance_url"] = (request.form.get("instance_url") or "").strip()
         cfg["access_token"] = (request.form.get("access_token") or "").strip()
@@ -534,6 +592,27 @@ def monitor_source_save(name: str):
     monitor_store.save_source(name, enabled, cfg)
     flash(f"{MONITOR_SOURCE_LABELS.get(name, name)} saved.", "ok")
     return redirect(url_for("monitor_sources_page") + f"#src-{name}")
+
+
+@app.route("/monitor/filters", methods=["GET", "POST"])
+def monitor_filters():
+    """Edit display-time noise filters: domain blocklist + min title length."""
+    if request.method == "POST":
+        raw = request.form.get("blocklist") or ""
+        domains = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        monitor_store.set_blocklist(domains)
+        try:
+            n = int(request.form.get("min_title_length", "0"))
+        except ValueError:
+            n = 0
+        monitor_store.set_min_title_length(n)
+        flash("Filters saved.", "ok")
+        return redirect(url_for("monitor_filters"))
+    return render_template(
+        "monitor_filters.html",
+        blocklist="\n".join(monitor_store.get_blocklist()),
+        min_title_length=monitor_store.get_min_title_length(),
+    )
 
 
 @app.route("/monitor/runs")
@@ -971,6 +1050,40 @@ def from_json(value):
         return _json.loads(value)
     except (TypeError, ValueError):
         return None
+
+
+@app.template_filter("to_est")
+def to_est(value, fmt: str = "%Y-%m-%d %H:%M %Z"):
+    """Render a UTC ISO timestamp in Eastern Time.
+
+    Uses the IANA zone America/New_York so DST is handled automatically:
+    you'll see EST in winter, EDT in summer. If the input is empty or
+    can't be parsed, returns it unchanged so the column doesn't blank
+    out unexpectedly.
+    """
+    if not value:
+        return ""
+    try:
+        from datetime import datetime, timezone
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo("America/New_York")
+        except Exception:
+            # zoneinfo can fail on stripped-down systems without tzdata —
+            # fall through and return the original ISO string so the
+            # column stays informative rather than blowing up.
+            return str(value)
+        s = str(value)
+        # datetime.fromisoformat in 3.11+ accepts the trailing 'Z'; older
+        # Pythons don't. Normalize defensively.
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(tz).strftime(fmt)
+    except (ValueError, TypeError):
+        return str(value)
 
 
 @app.template_filter("ts")

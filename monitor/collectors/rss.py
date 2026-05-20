@@ -10,7 +10,7 @@ import logging
 from typing import Iterable
 
 from ..storage import Document
-from .base import parse_dt
+from .base import extract_date_from_url, parse_dt
 
 
 log = logging.getLogger(__name__)
@@ -35,6 +35,14 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
             link = entry.get("link") or entry.get("id") or ""
             if not link:
                 continue
+            url_date = extract_date_from_url(link)
+            feed_date = parse_dt(entry.get("published") or entry.get("updated"))
+            if url_date is not None:
+                created_at = url_date
+                date_source = "url"
+            else:
+                created_at = feed_date
+                date_source = "feed_pubdate"
             yield Document(
                 source="rss",
                 source_id=link,
@@ -42,6 +50,6 @@ def collect(source_config: dict, keywords: list[str]) -> Iterable[Document]:
                 title=entry.get("title", "") or "",
                 content=entry.get("summary") or entry.get("description") or "",
                 url=link,
-                created_at=parse_dt(entry.get("published") or entry.get("updated")),
-                extra={"feed_url": url},
+                created_at=created_at,
+                extra={"feed_url": url, "date_source": date_source},
             )

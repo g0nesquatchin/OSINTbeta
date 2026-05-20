@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 from .filters import MatchResult, Topic
+from .url_norm import canonicalize
 
 
 SCHEMA = """
@@ -40,19 +41,25 @@ CREATE TABLE IF NOT EXISTS sources (
 );
 
 CREATE TABLE IF NOT EXISTS documents (
-    dedup_key    TEXT PRIMARY KEY,
-    source       TEXT NOT NULL,
-    source_id    TEXT NOT NULL,
-    author       TEXT,
-    title        TEXT,
-    content      TEXT,
-    url          TEXT,
-    created_at   TEXT,
-    collected_at TEXT NOT NULL,
-    extra_json   TEXT
+    dedup_key     TEXT PRIMARY KEY,
+    source        TEXT NOT NULL,
+    source_id     TEXT NOT NULL,
+    author        TEXT,
+    title         TEXT,
+    content       TEXT,
+    url           TEXT,
+    -- Cross-source dedup key: normalized form of `url` so the same
+    -- article surfaced via GDELT + Google News + RSS collapses to one
+    -- row at display time. Populated by save_match; backfilled by
+    -- _migrate() for legacy rows.
+    canonical_url TEXT,
+    created_at    TEXT,
+    collected_at  TEXT NOT NULL,
+    extra_json    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source);
 CREATE INDEX IF NOT EXISTS idx_documents_collected_at ON documents(collected_at);
+CREATE INDEX IF NOT EXISTS idx_documents_canonical_url ON documents(canonical_url);
 
 CREATE TABLE IF NOT EXISTS matches (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,17 +138,47 @@ class MonitorStore:
     def _migrate(self) -> None:
         """Apply idempotent ALTER TABLE migrations for columns added after
         the original schema shipped. Safe to run on every startup."""
-        existing = {
+        runs_cols = {
             row["name"] for row in
             self.conn.execute("PRAGMA table_info(runs)").fetchall()
         }
-        if "source_errors_json" not in existing:
+        if "source_errors_json" not in runs_cols:
             self.conn.execute(
                 "ALTER TABLE runs ADD COLUMN source_errors_json TEXT"
             )
-        if "warnings_json" not in existing:
+        if "warnings_json" not in runs_cols:
             self.conn.execute(
                 "ALTER TABLE runs ADD COLUMN warnings_json TEXT"
+            )
+
+        doc_cols = {
+            row["name"] for row in
+            self.conn.execute("PRAGMA table_info(documents)").fetchall()
+        }
+        if "canonical_url" not in doc_cols:
+            self.conn.execute(
+                "ALTER TABLE documents ADD COLUMN canonical_url TEXT"
+            )
+            # Index missing too — CREATE INDEX IF NOT EXISTS is idempotent.
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_documents_canonical_url "
+                "ON documents(canonical_url)"
+            )
+
+        # Backfill any rows lacking canonical_url. This runs every
+        # startup but the SELECT is indexed and typically zero-cost —
+        # save_match() populates the column on every new insert. The
+        # generality matters for two cases: legacy DBs where the column
+        # was added by an earlier startup, and rows inserted via direct
+        # SQL (tests, manual fixups) that skipped save_match.
+        rows = self.conn.execute(
+            "SELECT dedup_key, url FROM documents "
+            "WHERE canonical_url IS NULL AND url IS NOT NULL AND url != ''"
+        ).fetchall()
+        for r in rows:
+            self.conn.execute(
+                "UPDATE documents SET canonical_url = ? WHERE dedup_key = ?",
+                (canonicalize(r["url"]), r["dedup_key"]),
             )
 
     def close(self) -> None:
@@ -283,6 +320,7 @@ class MonitorStore:
 
     def save_match(self, doc: Document, matches: list[MatchResult]) -> bool:
         key = doc.dedup_key()
+        canon = canonicalize(doc.url) if doc.url else None
         cur = self.conn.cursor()
         existed = cur.execute(
             "SELECT 1 FROM documents WHERE dedup_key=?", (key,)
@@ -291,12 +329,14 @@ class MonitorStore:
             """
             INSERT OR IGNORE INTO documents
                 (dedup_key, source, source_id, author, title, content,
-                 url, created_at, collected_at, extra_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 url, canonical_url,
+                 created_at, collected_at, extra_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 key, doc.source, doc.source_id, doc.author, doc.title,
-                doc.content, doc.url, _iso(doc.created_at),
+                doc.content, doc.url, canon,
+                _iso(doc.created_at),
                 _iso(datetime.now(timezone.utc)),
                 json.dumps(doc.extra, default=str),
             ),
@@ -321,7 +361,19 @@ class MonitorStore:
         source: Optional[str] = None,
         since: Optional[str] = None,
         limit: int = 100,
-    ) -> list[sqlite3.Row]:
+        bypass_filters: bool = False,
+    ) -> list[dict]:
+        """Return up to `limit` matches, cross-source-deduped.
+
+        Rows that share a canonical_url collapse into one entry whose
+        ``source`` field is a comma-separated list of every source that
+        carried the article, with the earliest-published representative
+        chosen for title/content. Legacy rows with NULL canonical_url
+        are treated as their own group.
+
+        Returns dicts (not sqlite3.Row) because aggregation produces
+        derived fields that don't map to single columns.
+        """
         sql = [
             "SELECT d.*, GROUP_CONCAT(DISTINCT t.name) AS topics "
             "FROM documents d "
@@ -344,11 +396,34 @@ class MonitorStore:
             sql.append("AND d.source=?")
             args.append(source)
         if since:
-            sql.append("AND (d.created_at >= ? OR d.collected_at >= ?)")
-            args.extend([since, since])
-        sql.append("GROUP BY d.dedup_key ORDER BY d.collected_at DESC LIMIT ?")
-        args.append(limit)
-        return self.conn.execute(" ".join(sql), args).fetchall()
+            # Strict: filter by the article's publication date only.
+            # Without `created_at` (some sources don't expose a date),
+            # the row is excluded from date-windowed views — the
+            # conservative choice when the question is "is this fresh?".
+            sql.append("AND d.created_at >= ?")
+            args.append(since)
+        # Sort by the timestamp we actually display (article publication
+        # time, falling back to collection time) so "most recent on top"
+        # matches what the user sees in the When column.
+        sql.append(
+            "GROUP BY d.dedup_key "
+            "ORDER BY COALESCE(d.created_at, d.collected_at) DESC LIMIT ?"
+        )
+        # Fetch ~3x the user's limit so we have headroom to collapse
+        # duplicates and still hit the requested count. Capped to avoid
+        # pathological scans.
+        fetch_n = min(max(limit * 3, limit + 50), 5000)
+        args.append(fetch_n)
+        rows = self.conn.execute(" ".join(sql), args).fetchall()
+        # Aggregate sources across the rows first; we'll filter at the
+        # row level afterward (a row is one canonical article).
+        collapsed = _collapse_by_canonical(rows, limit=fetch_n)
+        if bypass_filters:
+            return collapsed[:limit]
+        blocklist = self.get_blocklist()
+        min_title = self.get_min_title_length()
+        filtered = _apply_display_filters(collapsed, blocklist, min_title)
+        return filtered[:limit]
 
     def stats(self) -> dict:
         n = self.conn.execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"]
@@ -441,3 +516,151 @@ class MonitorStore:
             (key, value),
         )
         self.conn.commit()
+
+    # --- global filters ------------------------------------------
+    # Display-time filters applied by search_matches() unless bypassed.
+    # Stored as settings rows so they survive restarts without their own
+    # table or migration.
+
+    def get_blocklist(self) -> list[str]:
+        """Return the configured domain blocklist as a list. Domains
+        are lowercased and stripped of any leading "www." so user
+        input doesn't have to be exact."""
+        raw = self.get_setting("filter_domain_blocklist", "")
+        out: list[str] = []
+        for line in raw.splitlines():
+            d = line.strip().lower().lstrip(".")
+            if d.startswith("www."):
+                d = d[4:]
+            if d:
+                out.append(d)
+        return out
+
+    def set_blocklist(self, domains: list[str]) -> None:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for d in domains:
+            d = (d or "").strip().lower().lstrip(".")
+            if d.startswith("www."):
+                d = d[4:]
+            if d and d not in seen:
+                seen.add(d)
+                normalized.append(d)
+        self.set_setting(
+            "filter_domain_blocklist", "\n".join(normalized),
+        )
+
+    def get_min_title_length(self) -> int:
+        try:
+            return max(0, int(self.get_setting("filter_min_title_length", "0")))
+        except ValueError:
+            return 0
+
+    def set_min_title_length(self, n: int) -> None:
+        try:
+            n = max(0, int(n))
+        except (TypeError, ValueError):
+            n = 0
+        self.set_setting("filter_min_title_length", str(n))
+
+
+def _collapse_by_canonical(
+    rows: Iterable[sqlite3.Row], limit: int,
+) -> list[dict]:
+    """Collapse rows sharing a canonical_url into single dicts.
+
+    Aggregation rules:
+      - source: comma-separated, distinct, in order of first appearance
+      - source_count: number of distinct sources carrying the article
+      - title/content/url/author: from the representative (first) row
+        in each group (rows arrive sorted newest-first, so the rep is
+        the *latest* report of the article — usually the freshest title)
+      - topics: union across the group's rows
+      - extra_json: extra is from the representative row
+      - dedup_key, source_id: representative's
+      - collected_at / created_at: max(group) — the latest seen instance
+
+    Groups are emitted in their first-seen order, which preserves the
+    upstream ORDER BY (newest-first by created_at/collected_at).
+    """
+    groups: dict[str, dict] = {}
+    for r in rows:
+        canon = r["canonical_url"] or r["dedup_key"]
+        group = groups.get(canon)
+        if group is None:
+            # First time we've seen this canonical key — this row is
+            # the representative for display.
+            d = {col: r[col] for col in r.keys()}
+            d["sources"] = [r["source"]]
+            d["source_count"] = 1
+            groups[canon] = d
+            continue
+        # Append this row's source if it's new for this group.
+        if r["source"] not in group["sources"]:
+            group["sources"].append(r["source"])
+            group["source_count"] = len(group["sources"])
+        # Union topic tags across the group's rows. Topics from this row
+        # may include ones the rep didn't pick up if the match was
+        # per-source.
+        for t in (r["topics"] or "").split(","):
+            t = t.strip()
+            if not t:
+                continue
+            existing = (group["topics"] or "").split(",")
+            existing = {x.strip() for x in existing if x.strip()}
+            if t not in existing:
+                group["topics"] = (group["topics"] + "," + t) \
+                    if group["topics"] else t
+    # Truncate to the user's limit AFTER aggregation so duplicate
+    # source-rows of in-window articles still contribute their source
+    # tag to the rep's sources list.
+    return list(groups.values())[:limit]
+
+
+def _host_of(url: str) -> str:
+    """Lowercase hostname from a URL, with leading 'www.' stripped.
+    Returns '' on parse failure."""
+    if not url:
+        return ""
+    try:
+        from urllib.parse import urlsplit
+        host = (urlsplit(url).netloc or "").lower()
+    except ValueError:
+        return ""
+    if ":" in host:  # strip port if present
+        host = host.rsplit(":", 1)[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _host_matches_blocklist(host: str, blocklist: list[str]) -> bool:
+    """True if the host exactly equals or is a subdomain of any
+    entry in ``blocklist``. Blocklist entries are pre-normalized to
+    lowercase, no 'www.', by the storage helpers."""
+    if not host or not blocklist:
+        return False
+    for entry in blocklist:
+        if host == entry or host.endswith("." + entry):
+            return True
+    return False
+
+
+def _apply_display_filters(
+    rows: list[dict],
+    blocklist: list[str],
+    min_title_length: int,
+) -> list[dict]:
+    """Drop rows whose canonical host is blocklisted or whose title is
+    shorter than the minimum. Operates on collapsed rows so each
+    decision is per-article rather than per-source-variant."""
+    out: list[dict] = []
+    for row in rows:
+        title = (row.get("title") or "").strip()
+        if min_title_length and len(title) < min_title_length:
+            continue
+        url = row.get("canonical_url") or row.get("url") or ""
+        if _host_matches_blocklist(_host_of(url), blocklist):
+            continue
+        out.append(row)
+    return out

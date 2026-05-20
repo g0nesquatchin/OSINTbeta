@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Filters · Monitor · OSINT{% endblock %}
+{% block content %}
+
+<div class="small"><a href="{{ url_for('monitor') }}">← Monitor</a></div>
+<h1>Display filters</h1>
+<p class="muted">
+  Applied at render time on the matches table — they hide rows but
+  never drop data from the DB. To see what's currently being hidden,
+  open <a href="{{ url_for('monitor', bypass_filters=1) }}">/monitor?bypass_filters=1</a>.
+</p>
+
+<form method="post" action="{{ url_for('monitor_filters') }}" class="panel">
+  <h2 style="margin:0 0 4px;">Domain blocklist</h2>
+  <p class="small muted" style="margin:0 0 10px;">
+    One host per line. Matches the canonical host exactly OR as a
+    subdomain — <code>msn.com</code> blocks <code>msn.com</code> and
+    <code>news.msn.com</code> and <code>www.msn.com</code>. Leading
+    <code>www.</code> on your input is stripped automatically.
+  </p>
+  <div class="field">
+    <label>Domains</label>
+    <textarea name="blocklist" rows="8" placeholder="msn.com&#10;yahoo.com&#10;prnewswire.com">{{ blocklist }}</textarea>
+  </div>
+
+  <h2 style="margin:18px 0 4px;">Minimum title length</h2>
+  <p class="small muted" style="margin:0 0 10px;">
+    Drop rows whose title is shorter than this many characters. Useful
+    when broken RSS parsing produces empty or single-word titles.
+    Set to <code>0</code> to disable.
+  </p>
+  <div class="field">
+    <label>Min characters</label>
+    <input type="number" name="min_title_length" value="{{ min_title_length }}" min="0" max="200" style="width:120px;">
+  </div>
+
+  <div style="margin-top:14px;">
+    <button type="submit">Save filters</button>
+    <a class="btn ghost" href="{{ url_for('monitor') }}" style="margin-left:8px;">Done</a>
+  </div>
+</form>
+
+{% endblock %}

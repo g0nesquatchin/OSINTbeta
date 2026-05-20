@@ -28,19 +28,20 @@ from typing import Any
 
 import requests
 
+from .collectors._throttle import GDELT_API as _gdelt_throttle
+
 
 ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 
-# Cache TTL and rate-limit tuning
+# Cache TTL and rate-limit tuning. The actual gap-between-requests
+# logic now lives in the shared GDELT_API throttle (see
+# monitor.collectors._throttle) so the GKG collector, the GDELT
+# collector, and this Geo API client all coordinate.
 _TTL_S = 300                  # cache lifetime
-_MIN_GAP_S = 5.5              # minimum seconds between outbound requests
 _RETRY_WAIT_S = 7.0           # wait after a 429 before retrying once
 
 _cache: dict[tuple, tuple[float, Any]] = {}
 _cache_lock = threading.Lock()
-
-_throttle_lock = threading.Lock()
-_last_request_at: float = 0.0
 
 _CACHE_FILE = os.environ.get(
     "GDELT_CACHE_FILE",
@@ -112,17 +113,6 @@ _load_disk_cache()
 # --- helpers -----------------------------------------------------
 
 
-def _wait_for_slot() -> None:
-    """Sleep so the next outbound request respects the 5s gap."""
-    global _last_request_at
-    with _throttle_lock:
-        now = time.time()
-        wait = (_last_request_at + _MIN_GAP_S) - now
-        if wait > 0:
-            time.sleep(wait)
-        _last_request_at = time.time()
-
-
 def _looks_rate_limited(status: int, body: str) -> bool:
     if status == 429:
         return True
@@ -134,7 +124,7 @@ def _looks_rate_limited(status: int, body: str) -> bool:
 def _do_request(query: str, timespan: str, maxpoints: int,
                 timeout: float) -> tuple[int, str]:
     """One GET to GDELT — returns (status, body). Throttled."""
-    _wait_for_slot()
+    _gdelt_throttle.wait()
     params = {
         "query": query,
         "mode": "PointData",
